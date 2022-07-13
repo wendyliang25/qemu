@@ -1,0 +1,4 @@
+config VIRTIO_TEE
+    bool
+    default y
+    depends on VIRTIO
