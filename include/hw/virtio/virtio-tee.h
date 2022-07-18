@@ -30,7 +30,10 @@
 
 #include "qemu/queue.h"
 #include "standard-headers/linux/virtio_ids.h"
+#include "standard-headers/linux/virtio_tee.h"
 #include "qemu/osdep.h"
+#include "qemu/log.h"
+#include "qemu/iov.h"
 #include "qom/object.h"
 #include "hw/virtio/virtio.h"
 
@@ -44,14 +47,38 @@ struct VirtIOTEE {
 
     QEMUBH *cmd_bh;
 
-    /* TODO: add further fields */
+    QTAILQ_HEAD(, virtio_tee_command) cmdq;
+
+    bool processing_cmdq;
 };
 
 struct VirtIOTEEClass {
     VirtioDeviceClass parent;
 
-    /* TODO: add further methods */
+    void (*handle_cmd)(VirtIODevice *vdev, VirtQueue *vq);
+    void (*process_cmd)(VirtIOTEE *t, struct virtio_tee_command *cmd);
 };
+
+struct virtio_tee_command {
+    VirtQueueElement elem;
+    VirtQueue *vq;
+    struct virtio_tee_hdr cmd_hdr;
+    uint32_t error;
+    bool finished;
+    QTAILQ_ENTRY(virtio_tee_command) next;
+};
+
+#define VIRTIO_TEE_FILL_CMD(out) do {                                   \
+        size_t s;                                                       \
+        s = iov_to_buf(cmd->elem.out_sg, cmd->elem.out_num, 0,          \
+                       &out, sizeof(out));                              \
+        if (s != sizeof(out)) {                                         \
+            qemu_log_mask(LOG_GUEST_ERROR,                              \
+                          "%s: command size incorrect %zu vs %zu\n",    \
+                          __func__, s, sizeof(out));                    \
+            return;                                                     \
+        }                                                               \
+    } while (0)
 
 void virtio_tee_reset(VirtIODevice *vdev);
 
