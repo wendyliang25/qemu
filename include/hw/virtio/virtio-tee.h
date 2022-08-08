@@ -68,6 +68,8 @@ struct virtio_tee_command {
     QTAILQ_ENTRY(virtio_tee_command) next;
 };
 
+#define PAGE_SIZE       4096
+
 #define VIRTIO_TEE_FILL_CMD(out) do {                                   \
         size_t s;                                                       \
         s = iov_to_buf(cmd->elem.out_sg, cmd->elem.out_num, 0,          \

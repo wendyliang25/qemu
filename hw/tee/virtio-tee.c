@@ -30,6 +30,7 @@
 #include "hw/virtio/virtio.h"
 #include "qemu/main-loop.h"
 #include "qemu/bswap.h"
+#include "sysemu/dma.h"
 #include "virtio-tee-client.h"
 
 static inline void
@@ -104,6 +105,117 @@ static void virtio_tee_close_device(VirtIOTEE *t,
     teec_close_device(fd);
 }
 
+static void virtio_tee_register_mem(VirtIOTEE *t,
+                                    struct virtio_tee_command *cmd)
+{
+    struct virtio_tee_cmd_register_mem reg_mem;
+    TEEC_SharedMemory shm;
+    dma_addr_t addr, len;
+    TEEC_Context ctx;
+    uint32_t size;
+    int ret;
+
+    VIRTIO_TEE_FILL_CMD(reg_mem);
+
+    addr = le64_to_cpu(reg_mem.addr);
+    size = le32_to_cpu(reg_mem.size);
+
+    /*
+     * Virtio TEE driver allocates extra page. Hence, size is expected
+     * to be greater than PAGE_SIZE
+     */
+    if (size < PAGE_SIZE) {
+        fprintf(stderr, "register_mem: error unexpected size %u\n", size);
+        goto err;
+    }
+
+    len = size;
+
+    shm.buffer = dma_memory_map(VIRTIO_DEVICE(t)->dma_as,
+                                addr, &len, DMA_DIRECTION_FROM_DEVICE,
+				MEMTXATTRS_UNSPECIFIED);
+    if (!shm.buffer || len < size) {
+        fprintf(stderr, "register_mem: error dma_memory_map failed\n");
+        if (shm.buffer) {
+            dma_memory_unmap(VIRTIO_DEVICE(t)->dma_as,
+                             shm.buffer, len, DMA_DIRECTION_FROM_DEVICE, 0);
+        }
+        goto err;
+    }
+
+    shm.size = size - PAGE_SIZE;
+
+    /*
+     * teec_register_shared_memory() does not make use of flags.
+     * So, set a dummy value.
+     */
+    shm.flags = TEEC_MEM_INPUT | TEEC_MEM_OUTPUT;
+
+    ctx.fd = le32_to_cpu(reg_mem.fd);
+    ctx.reg_mem = false; /* Use allocate shm */
+
+    ret = teec_register_shared_memory(&ctx, &shm);
+    if (ret) {
+        fprintf(stderr,
+                "register_mem: error teec_register_shared_memory failed %d\n",
+                ret);
+        dma_memory_unmap(VIRTIO_DEVICE(t)->dma_as,
+                         shm.buffer, len, DMA_DIRECTION_FROM_DEVICE, 0);
+        goto err;
+    }
+
+    /* Save the registered TEEC_SharedMemory context */
+    memcpy((void *)((uintptr_t) shm.buffer + size - PAGE_SIZE),
+           &shm, sizeof(shm));
+
+    dma_memory_unmap(VIRTIO_DEVICE(t)->dma_as,
+                     shm.buffer, len, DMA_DIRECTION_FROM_DEVICE, 0);
+    return;
+err:
+    cmd->error = VIRTIO_TEE_RESP_ERR_REGISTER_MEM;
+}
+
+static void virtio_tee_unregister_mem(VirtIOTEE *t,
+                                      struct virtio_tee_command *cmd)
+{
+    struct virtio_tee_cmd_unregister_mem unreg_mem;
+    TEEC_SharedMemory *shm;
+    dma_addr_t addr, len;
+    uint32_t size;
+    void *buffer;
+
+    VIRTIO_TEE_FILL_CMD(unreg_mem);
+
+    addr = le64_to_cpu(unreg_mem.addr);
+    size = le32_to_cpu(unreg_mem.size);
+
+    len = size;
+
+    buffer = dma_memory_map(VIRTIO_DEVICE(t)->dma_as,
+                            addr, &len, DMA_DIRECTION_TO_DEVICE,
+			    MEMTXATTRS_UNSPECIFIED);
+    if (!buffer || len < size) {
+        fprintf(stderr, "unregister_mem: error dma_memory_map failed\n");
+        if (buffer) {
+            dma_memory_unmap(VIRTIO_DEVICE(t)->dma_as, buffer, len,
+                             DMA_DIRECTION_TO_DEVICE, 0);
+        }
+        goto err;
+    }
+
+    shm = (TEEC_SharedMemory *)((uintptr_t) buffer + size - PAGE_SIZE);
+
+    shm->buffer = buffer;
+
+    teec_release_shared_memory(shm);
+
+    dma_memory_unmap(VIRTIO_DEVICE(t)->dma_as,
+                     buffer, len, DMA_DIRECTION_TO_DEVICE, 0);
+    return;
+err:
+    cmd->error = VIRTIO_TEE_RESP_ERR_UNREGISTER_MEM;
+}
+
 static void virtio_tee_process_cmd(VirtIOTEE *t,
                                    struct virtio_tee_command *cmd)
 {
@@ -116,6 +228,12 @@ static void virtio_tee_process_cmd(VirtIOTEE *t,
         break;
     case VIRTIO_TEE_CMD_CLOSE_DEVICE:
         virtio_tee_close_device(t, cmd);
+        break;
+    case VIRTIO_TEE_CMD_REGISTER_MEM:
+        virtio_tee_register_mem(t, cmd);
+        break;
+    case VIRTIO_TEE_CMD_UNREGISTER_MEM:
+        virtio_tee_unregister_mem(t, cmd);
         break;
     default:
         cmd->error = VIRTIO_TEE_RESP_ERR_UNSPECIFIED;

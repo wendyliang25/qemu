@@ -33,7 +33,8 @@ enum virtio_tee_cmd_type {
 	/* commands */
 	VIRTIO_TEE_CMD_OPEN_DEVICE = 0x2000,
 	VIRTIO_TEE_CMD_CLOSE_DEVICE,
-	VIRTIO_TEE_CMD_GET_VERSION,
+	VIRTIO_TEE_CMD_REGISTER_MEM,
+	VIRTIO_TEE_CMD_UNREGISTER_MEM,
 	VIRTIO_TEE_CMD_OPEN_SESSION,
 	VIRTIO_TEE_CMD_CLOSE_SESSION,
 	VIRTIO_TEE_CMD_INVOKE_FUNC,
@@ -42,7 +43,6 @@ enum virtio_tee_cmd_type {
 	/* success responses */
 	VIRTIO_TEE_RESP_OK_NODATA = 0x2100,
 	VIRTIO_TEE_RESP_OK_OPEN_DEVICE,
-	VIRTIO_TEE_RESP_OK_GET_VERSION,
 	VIRTIO_TEE_RESP_OK_OPEN_SESSION,
 	VIRTIO_TEE_RESP_OK_CLOSE_SESSION,
 	VIRTIO_TEE_RESP_OK_INVOKE_FUNC,
@@ -52,6 +52,8 @@ enum virtio_tee_cmd_type {
 	VIRTIO_TEE_RESP_ERR_UNSPECIFIED = 0x2200,
 	VIRTIO_TEE_RESP_ERR_OPEN_DEVICE,
 	VIRTIO_TEE_RESP_ERR_CLOSE_DEVICE,
+	VIRTIO_TEE_RESP_ERR_REGISTER_MEM,
+	VIRTIO_TEE_RESP_ERR_UNREGISTER_MEM,
 };
 
 #define ERROR_RESPONSE(x) (le32_to_cpu(x) >= VIRTIO_TEE_RESP_ERR_UNSPECIFIED)
@@ -73,4 +75,18 @@ struct virtio_tee_cmd_close_device {
 	__le32 fd;
 };
 
+/* VIRTIO_TEE_CMD_REGISTER_MEM */
+struct virtio_tee_cmd_register_mem {
+	struct virtio_tee_hdr hdr;
+	__le64 addr;
+	__le32 size;
+	__le32 fd;
+};
+
+/* VIRTIO_TEE_CMD_UNREGISTER_MEM */
+struct virtio_tee_cmd_unregister_mem {
+	struct virtio_tee_hdr hdr;
+	__le64 addr;
+	__le32 size;
+};
 #endif
