@@ -43,6 +43,11 @@
 
 #define TEEC_MAX_DEV_SEQ        10
 
+/* Helpers to access memref parts of a struct tee_ioctl_param */
+#define MEMREF_SHM_ID(p)        ((p)->c)
+#define MEMREF_SHM_OFFS(p)      ((p)->a)
+#define MEMREF_SIZE(p)          ((p)->b)
+
 /*
  * Internal flags of TEEC_SharedMemory::internal.flags
  */
@@ -93,6 +98,16 @@ void teec_close_device(int fd)
     close(fd);
 }
 
+static TEEC_Result ioctl_errno_to_res(int err)
+{
+    switch (err) {
+    case ENOMEM:
+        return TEEC_ERROR_OUT_OF_MEMORY;
+    default:
+        return TEEC_ERROR_GENERIC;
+    }
+}
+
 static int teec_shm_alloc(int fd, size_t size, int *id)
 {
     int shm_fd;
@@ -138,7 +153,62 @@ static void *teec_paged_aligned_alloc(size_t sz)
     return NULL;
 }
 
-int teec_register_shared_memory(TEEC_Context *ctx, TEEC_SharedMemory *shm)
+TEEC_Result teec_allocate_shared_memory(TEEC_Context *ctx,
+                                        TEEC_SharedMemory *shm)
+{
+    int fd;
+    size_t s;
+
+    if (!ctx || !shm) {
+        return TEEC_ERROR_BAD_PARAMETERS;
+    }
+
+    if (!shm->flags || (shm->flags & ~(TEEC_MEM_INPUT | TEEC_MEM_OUTPUT))) {
+        return TEEC_ERROR_BAD_PARAMETERS;
+    }
+
+    s = shm->size;
+    if (!s) {
+        s = 8;
+    }
+
+    if (ctx->reg_mem) {
+        shm->buffer = teec_paged_aligned_alloc(s);
+        if (!shm->buffer) {
+            return TEEC_ERROR_OUT_OF_MEMORY;
+        }
+
+        fd = teec_shm_register(ctx->fd, shm->buffer, s, &shm->id);
+        if (fd < 0) {
+            free(shm->buffer);
+            shm->buffer = NULL;
+            return TEEC_ERROR_OUT_OF_MEMORY;
+        }
+        shm->registered_fd = fd;
+    } else {
+        fd = teec_shm_alloc(ctx->fd, s, &shm->id);
+        if (fd < 0) {
+            return TEEC_ERROR_OUT_OF_MEMORY;
+        }
+
+        shm->buffer = mmap(NULL, s, PROT_READ | PROT_WRITE,
+                           MAP_SHARED, fd, 0);
+        close(fd);
+        if (shm->buffer == (void *)MAP_FAILED) {
+            shm->id = -1;
+            return TEEC_ERROR_OUT_OF_MEMORY;
+        }
+        shm->registered_fd = -1;
+    }
+
+    shm->shadow_buffer = NULL;
+    shm->alloced_size = s;
+    shm->internal.flags = SHM_FLAG_BUFFER_ALLOCED;
+    return TEEC_SUCCESS;
+}
+
+TEEC_Result teec_register_shared_memory(TEEC_Context *ctx,
+                                        TEEC_SharedMemory *shm)
 {
     int res = 0;
     int fd;
@@ -255,4 +325,425 @@ void teec_release_shared_memory(TEEC_SharedMemory *shm)
     shm->buffer = NULL;
     shm->registered_fd = -1;
     shm->internal.flags = 0;
+}
+
+static
+TEEC_Result teec_pre_process_tmpref(TEEC_Context *ctx,
+                                    uint32_t param_type,
+                                    TEEC_TempMemoryReference *tmpref,
+                                    struct tee_ioctl_param *param,
+                                    TEEC_SharedMemory *shm)
+{
+    TEEC_Result res;
+
+    switch (param_type) {
+    case TEEC_MEMREF_TEMP_INPUT:
+        param->attr = TEE_IOCTL_PARAM_ATTR_TYPE_MEMREF_INPUT;
+        shm->flags = TEEC_MEM_INPUT;
+        break;
+    case TEEC_MEMREF_TEMP_OUTPUT:
+        param->attr = TEE_IOCTL_PARAM_ATTR_TYPE_MEMREF_OUTPUT;
+        shm->flags = TEEC_MEM_OUTPUT;
+        break;
+    case TEEC_MEMREF_TEMP_INOUT:
+        param->attr = TEE_IOCTL_PARAM_ATTR_TYPE_MEMREF_INOUT;
+        shm->flags = TEEC_MEM_INPUT | TEEC_MEM_OUTPUT;
+        break;
+    default:
+        return TEEC_ERROR_BAD_PARAMETERS;
+    }
+
+    shm->size = tmpref->size;
+
+    res = teec_allocate_shared_memory(ctx, shm);
+    if (res != TEEC_SUCCESS) {
+        return res;
+    }
+
+    memcpy(shm->buffer, tmpref->buffer, tmpref->size);
+    MEMREF_SIZE(param) = tmpref->size;
+    MEMREF_SHM_ID(param) = shm->id;
+    return TEEC_SUCCESS;
+}
+
+static
+TEEC_Result teec_pre_process_whole(TEEC_RegisteredMemoryReference *memref,
+                                   struct tee_ioctl_param *param)
+{
+    const uint32_t inout = TEEC_MEM_INPUT | TEEC_MEM_OUTPUT;
+    uint32_t flags;
+    TEEC_SharedMemory *shm;
+
+    if (!memref || !memref->parent) {
+        return TEEC_ERROR_BAD_PARAMETERS;
+    }
+
+    flags = memref->parent->flags & inout;
+
+    if (flags == inout) {
+        param->attr = TEE_IOCTL_PARAM_ATTR_TYPE_MEMREF_INOUT;
+    } else if (flags & TEEC_MEM_INPUT) {
+        param->attr = TEE_IOCTL_PARAM_ATTR_TYPE_MEMREF_INPUT;
+    } else if (flags & TEEC_MEM_OUTPUT) {
+        param->attr = TEE_IOCTL_PARAM_ATTR_TYPE_MEMREF_OUTPUT;
+    } else {
+        return TEEC_ERROR_BAD_PARAMETERS;
+    }
+
+    shm = memref->parent;
+    /*
+     * We're using a shadow buffer in this reference, copy the real buffer
+     * into the shadow buffer if needed. We'll copy it back once we've
+     * returned from the call to secure world.
+     */
+    if (shm->shadow_buffer && (flags & TEEC_MEM_INPUT)) {
+        memcpy(shm->shadow_buffer, shm->buffer, shm->size);
+    }
+
+    MEMREF_SHM_ID(param) = shm->id;
+    MEMREF_SIZE(param) = shm->size;
+    return TEEC_SUCCESS;
+}
+
+static
+TEEC_Result teec_pre_process_partial(uint32_t param_type,
+                                     TEEC_RegisteredMemoryReference *memref,
+                                     struct tee_ioctl_param *param)
+{
+    uint32_t req_shm_flags;
+    TEEC_SharedMemory *shm;
+
+    switch (param_type) {
+    case TEEC_MEMREF_PARTIAL_INPUT:
+        req_shm_flags = TEEC_MEM_INPUT;
+        param->attr = TEE_IOCTL_PARAM_ATTR_TYPE_MEMREF_INPUT;
+        break;
+    case TEEC_MEMREF_PARTIAL_OUTPUT:
+        req_shm_flags = TEEC_MEM_OUTPUT;
+        param->attr = TEE_IOCTL_PARAM_ATTR_TYPE_MEMREF_OUTPUT;
+        break;
+    case TEEC_MEMREF_PARTIAL_INOUT:
+        req_shm_flags = TEEC_MEM_OUTPUT | TEEC_MEM_INPUT;
+        param->attr = TEE_IOCTL_PARAM_ATTR_TYPE_MEMREF_INOUT;
+        break;
+    default:
+        return TEEC_ERROR_BAD_PARAMETERS;
+    }
+
+    if (!memref || !memref->parent) {
+        return TEEC_ERROR_BAD_PARAMETERS;
+    }
+
+    shm = memref->parent;
+
+    if ((shm->flags & req_shm_flags) != req_shm_flags) {
+        return TEEC_ERROR_BAD_PARAMETERS;
+    }
+
+    /*
+     * We're using a shadow buffer in this reference, copy the real buffer
+     * into the shadow buffer if needed. We'll copy it back once we've
+     * returned from the call to secure world.
+     */
+    if (shm->shadow_buffer && param_type != TEEC_MEMREF_PARTIAL_OUTPUT) {
+        memcpy((char *)shm->shadow_buffer + memref->offset,
+               (char *)shm->buffer + memref->offset, memref->size);
+    }
+
+    MEMREF_SHM_ID(param) = shm->id;
+    MEMREF_SHM_OFFS(param) = memref->offset;
+    MEMREF_SIZE(param) = memref->size;
+    return TEEC_SUCCESS;
+}
+
+static
+void teec_post_process_tmpref(uint32_t param_type,
+                              TEEC_TempMemoryReference *tmpref,
+                              struct tee_ioctl_param *param,
+                              TEEC_SharedMemory *shm)
+{
+    if (param_type != TEEC_MEMREF_TEMP_INPUT) {
+        if (MEMREF_SIZE(param) <= tmpref->size && tmpref->buffer) {
+            memcpy(tmpref->buffer, shm->buffer, MEMREF_SIZE(param));
+        }
+
+        tmpref->size = MEMREF_SIZE(param);
+    }
+}
+
+static
+void teec_post_process_whole(TEEC_RegisteredMemoryReference *memref,
+                             struct tee_ioctl_param *param)
+{
+    TEEC_SharedMemory *shm = memref->parent;
+
+    if (shm->flags & TEEC_MEM_OUTPUT) {
+
+        /*
+         * We're using a shadow buffer in this reference, copy back
+         * the shadow buffer into the real buffer now that we've
+         * returned from secure world.
+         */
+        if (shm->shadow_buffer && MEMREF_SIZE(param) <= memref->size) {
+            memcpy(shm->buffer, shm->shadow_buffer, MEMREF_SIZE(param));
+        }
+
+        memref->size = MEMREF_SIZE(param);
+    }
+}
+
+static
+void teec_post_process_partial(uint32_t param_type,
+                               TEEC_RegisteredMemoryReference *memref,
+                               struct tee_ioctl_param *param)
+{
+    if (param_type != TEEC_MEMREF_PARTIAL_INPUT) {
+        TEEC_SharedMemory *shm = memref->parent;
+
+        /*
+         * We're using a shadow buffer in this reference, copy back
+         * the shadow buffer into the real buffer now that we've
+         * returned from secure world.
+         */
+        if (shm->shadow_buffer && MEMREF_SIZE(param) <= memref->size) {
+            memcpy((char *)shm->buffer + memref->offset,
+                   (char *)shm->shadow_buffer + memref->offset,
+                   MEMREF_SIZE(param));
+        }
+
+        memref->size = MEMREF_SIZE(param);
+    }
+}
+
+static
+void teec_post_process_operation(TEEC_Operation *operation,
+                                 struct tee_ioctl_param *params,
+                                 TEEC_SharedMemory *shms)
+{
+    size_t n;
+
+    if (!operation) {
+        return;
+    }
+
+    for (n = 0; n < TEEC_CONFIG_PAYLOAD_REF_COUNT; n++) {
+        uint32_t param_type;
+
+        param_type = TEEC_PARAM_TYPE_GET(operation->paramTypes, n);
+
+        switch (param_type) {
+        case TEEC_VALUE_INPUT:
+            break;
+        case TEEC_VALUE_OUTPUT:
+        case TEEC_VALUE_INOUT:
+            operation->params[n].value.a = params[n].a;
+            operation->params[n].value.b = params[n].b;
+            break;
+        case TEEC_MEMREF_TEMP_INPUT:
+        case TEEC_MEMREF_TEMP_OUTPUT:
+        case TEEC_MEMREF_TEMP_INOUT:
+            teec_post_process_tmpref(param_type,
+                                     &operation->params[n].tmpref,
+                                     params + n,
+                                     shms + n);
+            break;
+        case TEEC_MEMREF_WHOLE:
+            teec_post_process_whole(&operation->params[n].memref,
+                                    params + n);
+            break;
+        case TEEC_MEMREF_PARTIAL_INPUT:
+        case TEEC_MEMREF_PARTIAL_OUTPUT:
+        case TEEC_MEMREF_PARTIAL_INOUT:
+            teec_post_process_partial(param_type,
+                                      &operation->params[n].memref,
+                                      params + n);
+            break;
+        default:
+            break;
+        }
+    }
+}
+
+static
+TEEC_Result teec_pre_process_operation(TEEC_Context *ctx,
+                                       TEEC_Operation *operation,
+                                       struct tee_ioctl_param *params,
+                                       TEEC_SharedMemory *shms)
+{
+    TEEC_Result res;
+    size_t n;
+
+    memset(shms, 0, sizeof(TEEC_SharedMemory) * TEEC_CONFIG_PAYLOAD_REF_COUNT);
+
+    for (n = 0; n < TEEC_CONFIG_PAYLOAD_REF_COUNT; n++) {
+        shms[n].id = -1;
+    }
+
+    if (!operation) {
+        memset(params, 0,
+               sizeof(struct tee_ioctl_param) * TEEC_CONFIG_PAYLOAD_REF_COUNT);
+        return TEEC_SUCCESS;
+    }
+
+    for (n = 0; n < TEEC_CONFIG_PAYLOAD_REF_COUNT; n++) {
+        uint32_t param_type;
+
+        param_type = TEEC_PARAM_TYPE_GET(operation->paramTypes, n);
+
+        switch (param_type) {
+        case TEEC_NONE:
+            params[n].attr = param_type;
+            break;
+        case TEEC_VALUE_INPUT:
+        case TEEC_VALUE_OUTPUT:
+        case TEEC_VALUE_INOUT:
+            params[n].attr = param_type;
+            params[n].a = operation->params[n].value.a;
+            params[n].b = operation->params[n].value.b;
+            break;
+        case TEEC_MEMREF_TEMP_INPUT:
+        case TEEC_MEMREF_TEMP_OUTPUT:
+        case TEEC_MEMREF_TEMP_INOUT:
+            res = teec_pre_process_tmpref(ctx, param_type,
+                                          &operation->params[n].tmpref,
+                                          params + n,
+                                          shms + n);
+            if (res != TEEC_SUCCESS) {
+                return res;
+            }
+            break;
+        case TEEC_MEMREF_WHOLE:
+            res = teec_pre_process_whole(&operation->params[n].memref,
+                                         params + n);
+            if (res != TEEC_SUCCESS) {
+                return res;
+            }
+            break;
+        case TEEC_MEMREF_PARTIAL_INPUT:
+        case TEEC_MEMREF_PARTIAL_OUTPUT:
+        case TEEC_MEMREF_PARTIAL_INOUT:
+            res = teec_pre_process_partial(param_type,
+                                           &operation->params[n].memref,
+                                           params + n);
+            if (res != TEEC_SUCCESS) {
+                return res;
+            }
+            break;
+        default:
+            return TEEC_ERROR_BAD_PARAMETERS;
+        }
+    }
+
+    return TEEC_SUCCESS;
+}
+
+static
+void teec_free_temp_refs(TEEC_Operation *operation,
+                         TEEC_SharedMemory *shms)
+{
+    size_t n;
+
+    if (!operation) {
+        return;
+    }
+
+    for (n = 0; n < TEEC_CONFIG_PAYLOAD_REF_COUNT; n++) {
+        switch (TEEC_PARAM_TYPE_GET(operation->paramTypes, n)) {
+        case TEEC_MEMREF_TEMP_INPUT:
+        case TEEC_MEMREF_TEMP_OUTPUT:
+        case TEEC_MEMREF_TEMP_INOUT:
+            teec_release_shared_memory(shms + n);
+            break;
+        default:
+            break;
+        }
+    }
+}
+
+TEEC_Result teec_open_session(TEEC_Context *ctx, TEEC_Session *session,
+                              const uint8_t uuid[],
+                              uint8_t connection_method,
+                              const void *connection_data,
+                              TEEC_Operation *operation, uint32_t *ret_origin)
+{
+    uint64_t buf[(sizeof(struct tee_ioctl_open_session_arg) +
+            TEEC_CONFIG_PAYLOAD_REF_COUNT * sizeof(struct tee_ioctl_param)) /
+            sizeof(uint64_t)] = { 0 };
+    TEEC_SharedMemory shm[TEEC_CONFIG_PAYLOAD_REF_COUNT];
+    struct tee_ioctl_buf_data buf_data;
+    struct tee_ioctl_open_session_arg *arg;
+    struct tee_ioctl_param *params;
+    TEEC_Result res;
+    uint32_t eorig;
+    int rc;
+
+    (void)&connection_data;
+
+    if (!ctx || !session) {
+        eorig = TEEC_ORIGIN_API;
+        res = TEEC_ERROR_BAD_PARAMETERS;
+        goto out;
+    }
+
+    if (connection_method != TEEC_LOGIN_PUBLIC) {
+        eorig = TEEC_ORIGIN_API;
+        res = TEEC_ERROR_NOT_SUPPORTED;
+        goto out;
+    }
+
+    buf_data.buf_ptr = (uintptr_t)buf;
+    buf_data.buf_len = sizeof(buf);
+
+    arg = (struct tee_ioctl_open_session_arg *)buf;
+    arg->num_params = TEEC_CONFIG_PAYLOAD_REF_COUNT;
+    params = (struct tee_ioctl_param *)(arg + 1);
+
+    memcpy(arg->uuid, uuid, 16);
+    arg->clnt_login = TEEC_LOGIN_PUBLIC;
+
+    res = teec_pre_process_operation(ctx, operation, params, shm);
+    if (res != TEEC_SUCCESS) {
+        eorig = TEEC_ORIGIN_API;
+        goto out_free_temp_refs;
+    }
+
+    rc = ioctl(ctx->fd, TEE_IOC_OPEN_SESSION, &buf_data);
+    if (rc) {
+        fprintf(stderr, "TEE_IOC_OPEN_SESSION failed");
+        eorig = TEEC_ORIGIN_COMMS;
+        res = ioctl_errno_to_res(errno);
+        goto out_free_temp_refs;
+    }
+
+    res = arg->ret;
+    eorig = arg->ret_origin;
+    if (res == TEEC_SUCCESS) {
+        session->ctx = ctx;
+        session->session_id = arg->session;
+    }
+    teec_post_process_operation(operation, params, shm);
+
+out_free_temp_refs:
+    teec_free_temp_refs(operation, shm);
+out:
+    if (ret_origin) {
+        *ret_origin = eorig;
+    }
+
+    return res;
+}
+
+void teec_close_session(TEEC_Session *session)
+{
+    struct tee_ioctl_close_session_arg arg;
+
+    if (!session) {
+        return;
+    }
+
+    arg.session = session->session_id;
+
+    if (ioctl(session->ctx->fd, TEE_IOC_CLOSE_SESSION, &arg)) {
+        fprintf(stderr, "Failed to close session 0x%x", session->session_id);
+    }
 }
