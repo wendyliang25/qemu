@@ -399,6 +399,10 @@ TEEC_Result teec_open_session(TEEC_Context *ctx, TEEC_Session *session,
 
 void teec_close_session(TEEC_Session *session);
 
+TEEC_Result teec_invoke_command(TEEC_Session *session, uint32_t cmd_id,
+                                TEEC_Operation *operation,
+                                uint32_t *error_origin);
+
 TEEC_Result teec_allocate_shared_memory(TEEC_Context *ctx,
                                         TEEC_SharedMemory *shm);
 #endif

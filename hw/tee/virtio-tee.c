@@ -542,6 +542,69 @@ static void virtio_tee_close_session(VirtIOTEE *t,
     teec_close_session(&session);
 }
 
+static void virtio_tee_invoke_func(VirtIOTEE *t,
+                                   struct virtio_tee_command *cmd)
+{
+    struct virtio_tee_cmd_invoke_func invoke_func;
+    struct virtio_tee_resp_invoke_func resp;
+    uint32_t ret_origin = TEEC_ORIGIN_COMMS;
+    TEEC_Operation op, *op_ptr = NULL;
+    TEEC_Result ret, status;
+    TEEC_Session session;
+    uint32_t num_params;
+    uint32_t session_id;
+    TEEC_Context ctx;
+    uint32_t func;
+    int fd;
+
+    VIRTIO_TEE_FILL_CMD(invoke_func);
+
+    resp.hdr.type = cpu_to_le32(VIRTIO_TEE_RESP_ERR_INVOKE_FUNC);
+
+    fd = le32_to_cpu(invoke_func.fd);
+    func = le32_to_cpu(invoke_func.func);
+    session_id = le32_to_cpu(invoke_func.session);
+    num_params = le32_to_cpu(invoke_func.num_params);
+
+    ctx.reg_mem = false;
+    ctx.fd = fd;
+
+    session.session_id = session_id;
+    session.ctx = &ctx;
+
+    if (num_params != 0) {
+        ret = virtio_params_to_teec_params(t, &op, num_params,
+                                           &invoke_func.op);
+        if (ret != TEEC_SUCCESS) {
+            goto end;
+        }
+        op_ptr = &op;
+    }
+
+    ret = teec_invoke_command(&session, func, op_ptr, &ret_origin);
+    if (ret == TEEC_SUCCESS) {
+        resp.hdr.type = cpu_to_le32(VIRTIO_TEE_RESP_OK_INVOKE_FUNC);
+    }
+
+    if (num_params != 0) {
+        resp.op.param_types = invoke_func.op.param_types;
+        status = teec_params_to_virtio_params(&op, num_params, &resp.op);
+
+        if (ret == TEEC_SUCCESS && status != TEEC_SUCCESS) {
+            resp.hdr.type = cpu_to_le32(VIRTIO_TEE_RESP_ERR_INVOKE_FUNC);
+            ret = status;
+            ret_origin = TEEC_ORIGIN_COMMS;
+        }
+
+        virtio_tee_unmap_params(t, &op, num_params);
+    }
+
+end:
+    resp.ret = cpu_to_le32(ret);
+    resp.ret_origin = cpu_to_le32(ret_origin);
+    virtio_tee_cmd_response(t, cmd, &resp.hdr, sizeof(resp));
+}
+
 static void virtio_tee_process_cmd(VirtIOTEE *t,
                                    struct virtio_tee_command *cmd)
 {
@@ -566,6 +629,9 @@ static void virtio_tee_process_cmd(VirtIOTEE *t,
         break;
     case VIRTIO_TEE_CMD_CLOSE_SESSION:
         virtio_tee_close_session(t, cmd);
+        break;
+    case VIRTIO_TEE_CMD_INVOKE_FUNC:
+        virtio_tee_invoke_func(t, cmd);
         break;
     default:
         cmd->error = VIRTIO_TEE_RESP_ERR_UNSPECIFIED;

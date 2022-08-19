@@ -87,6 +87,7 @@ enum virtio_tee_cmd_type {
 	VIRTIO_TEE_RESP_ERR_UNREGISTER_MEM,
 	VIRTIO_TEE_RESP_ERR_OPEN_SESSION,
 	VIRTIO_TEE_RESP_ERR_CLOSE_SESSION,
+	VIRTIO_TEE_RESP_ERR_INVOKE_FUNC,
 };
 
 #define ERROR_RESPONSE(x) (le32_to_cpu(x) >= VIRTIO_TEE_RESP_ERR_UNSPECIFIED)
@@ -176,5 +177,24 @@ struct virtio_tee_cmd_close_session {
 	struct virtio_tee_hdr hdr;
 	__le32 fd;
 	__le32 session;
+};
+
+/* VIRTIO_TEE_CMD_INVOKE_FUNC */
+struct virtio_tee_cmd_invoke_func {
+	struct virtio_tee_hdr hdr;
+	__le32 fd;
+	__le32 func;
+	__le32 session;
+	__le32 cancel_id;
+	__le32 num_params;
+	struct virtio_tee_operation op;
+};
+
+/* VIRTIO_TEE_RESP_OK_INVOKE_FUNC */
+struct virtio_tee_resp_invoke_func {
+	struct virtio_tee_hdr hdr;
+	struct virtio_tee_operation op;
+	__le32 ret;
+	__le32 ret_origin;
 };
 #endif

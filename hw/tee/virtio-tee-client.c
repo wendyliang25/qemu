@@ -34,6 +34,7 @@
 #include <sys/ioctl.h>
 #include <stdlib.h>
 #include <sys/mman.h>
+#include <pthread.h>
 #include "qemu/osdep.h"
 #include "virtio-tee-client.h"
 
@@ -53,6 +54,18 @@
  */
 #define SHM_FLAG_BUFFER_ALLOCED         (1u << 0)
 #define SHM_FLAG_SHADOW_BUFFER_ALLOCED  (1u << 1)
+
+static pthread_mutex_t teec_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void teec_mutex_lock(pthread_mutex_t *mu)
+{
+    pthread_mutex_lock(mu);
+}
+
+static void teec_mutex_unlock(pthread_mutex_t *mu)
+{
+    pthread_mutex_unlock(mu);
+}
 
 int teec_open_device(uint32_t *gen_caps)
 {
@@ -746,4 +759,68 @@ void teec_close_session(TEEC_Session *session)
     if (ioctl(session->ctx->fd, TEE_IOC_CLOSE_SESSION, &arg)) {
         fprintf(stderr, "Failed to close session 0x%x", session->session_id);
     }
+}
+
+TEEC_Result teec_invoke_command(TEEC_Session *session, uint32_t cmd_id,
+                                TEEC_Operation *operation,
+                                uint32_t *error_origin)
+{
+    uint64_t buf[(sizeof(struct tee_ioctl_invoke_arg) +
+                 TEEC_CONFIG_PAYLOAD_REF_COUNT *
+                 sizeof(struct tee_ioctl_param)) / sizeof(uint64_t)] = { 0 };
+    struct tee_ioctl_buf_data buf_data;
+    struct tee_ioctl_invoke_arg *arg;
+    struct tee_ioctl_param *params;
+    TEEC_Result res;
+    uint32_t eorig;
+    TEEC_SharedMemory shm[TEEC_CONFIG_PAYLOAD_REF_COUNT];
+    int rc;
+
+    if (!session) {
+        eorig = TEEC_ORIGIN_API;
+        res = TEEC_ERROR_BAD_PARAMETERS;
+        goto out;
+    }
+
+    buf_data.buf_ptr = (uintptr_t)buf;
+    buf_data.buf_len = sizeof(buf);
+
+    arg = (struct tee_ioctl_invoke_arg *)buf;
+    arg->num_params = TEEC_CONFIG_PAYLOAD_REF_COUNT;
+    params = (struct tee_ioctl_param *)(arg + 1);
+
+    arg->session = session->session_id;
+    arg->func = cmd_id;
+
+    if (operation) {
+        teec_mutex_lock(&teec_mutex);
+        operation->session = session;
+        teec_mutex_unlock(&teec_mutex);
+    }
+
+    res = teec_pre_process_operation(session->ctx, operation, params, shm);
+    if (res != TEEC_SUCCESS) {
+        eorig = TEEC_ORIGIN_API;
+        goto out_free_temp_refs;
+    }
+
+    rc = ioctl(session->ctx->fd, TEE_IOC_INVOKE, &buf_data);
+    if (rc) {
+        fprintf(stderr, "TEE_IOC_INVOKE failed\n");
+        eorig = TEEC_ORIGIN_COMMS;
+        res = ioctl_errno_to_res(errno);
+        goto out_free_temp_refs;
+    }
+
+    res = arg->ret;
+    eorig = arg->ret_origin;
+    teec_post_process_operation(operation, params, shm);
+
+out_free_temp_refs:
+    teec_free_temp_refs(operation, shm);
+out:
+    if (error_origin) {
+        *error_origin = eorig;
+    }
+    return res;
 }
