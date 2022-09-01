@@ -49,6 +49,7 @@ struct VirtIOTEE {
 
     QTAILQ_HEAD(, virtio_tee_command) cmdq;
 
+    uint32_t flags;
     bool processing_cmdq;
 };
 
@@ -81,6 +82,19 @@ struct virtio_tee_command {
             return;                                                     \
         }                                                               \
     } while (0)
+
+enum virtio_tee_flags {
+    VIRTIO_TEE_FLAG_SESSION_ENABLED = 1,
+    VIRTIO_TEE_FLAG_INVOKE_ENABLED,
+    VIRTIO_TEE_FLAG_CANCEL_ENABLED,
+};
+
+#define virtio_tee_session_enabled(_flags) \
+    (_flags & (1 << VIRTIO_TEE_FLAG_SESSION_ENABLED))
+#define virtio_tee_invoke_enabled(_flags) \
+    (_flags & (1 << VIRTIO_TEE_FLAG_INVOKE_ENABLED))
+#define virtio_tee_cancel_enabled(_flags) \
+    (_flags & (1 << VIRTIO_TEE_FLAG_CANCEL_ENABLED))
 
 void virtio_tee_reset(VirtIODevice *vdev);
 

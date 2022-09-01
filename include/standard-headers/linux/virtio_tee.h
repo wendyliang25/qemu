@@ -47,7 +47,7 @@
 /*
  * Open session and close session is supported
  */
-#define VIRTIO_TEE_F_OC_SESSION			0
+#define VIRTIO_TEE_F_SESSION			0
 
 /*
  * Invoke function is supported

@@ -750,9 +750,33 @@ static void virtio_tee_device_unrealize(DeviceState *qdev)
 {
 }
 
+static Property virtio_tee_properties[] = {
+    DEFINE_PROP_BIT("session", VirtIOTEE, flags,
+                    VIRTIO_TEE_FLAG_SESSION_ENABLED, true),
+    DEFINE_PROP_BIT("invoke", VirtIOTEE, flags,
+                    VIRTIO_TEE_FLAG_INVOKE_ENABLED, true),
+    DEFINE_PROP_BIT("cancel", VirtIOTEE, flags,
+                    VIRTIO_TEE_FLAG_CANCEL_ENABLED, false),
+    DEFINE_PROP_END_OF_LIST(),
+};
+
 static uint64_t virtio_tee_get_features(VirtIODevice *vdev, uint64_t features,
                                         Error **errp)
 {
+    VirtIOTEE *t = VIRTIO_TEE(vdev);
+
+    if (virtio_tee_session_enabled(t->flags)) {
+        features |= (1 << VIRTIO_TEE_F_SESSION);
+    }
+
+    if (virtio_tee_invoke_enabled(t->flags)) {
+        features |= (1 << VIRTIO_TEE_F_INVOKE_FUNC);
+    }
+
+    if (virtio_tee_cancel_enabled(t->flags)) {
+        features |= (1 << VIRTIO_TEE_F_CANCEL_REQ);
+    }
+
     return features;
 }
 
@@ -788,7 +812,9 @@ static void virtio_tee_class_init(ObjectClass *klass, void *data)
     set_bit(DEVICE_CATEGORY_MISC, dc->categories);
     dc->hotpluggable = false;
 
-    dc->vmsd = &vmstate_virtio_tee; /* TODO: Check this */
+    dc->vmsd = &vmstate_virtio_tee;
+
+    device_class_set_props(dc, virtio_tee_properties);
 }
 
 static const TypeInfo virtio_tee_info = {
