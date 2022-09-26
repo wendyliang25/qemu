@@ -916,6 +916,7 @@ void virtio_gpu_virgl_reset(VirtIOGPU *g)
 int virtio_gpu_virgl_init(VirtIOGPU *g)
 {
     int ret;
+    uint32_t flags = 0;
 
 #if VIRGL_RENDERER_CALLBACKS_VERSION >= 4
     if (qemu_egl_display) {
@@ -924,7 +925,11 @@ int virtio_gpu_virgl_init(VirtIOGPU *g)
     }
 #endif
 
-    ret = virgl_renderer_init(g, 0, &virtio_gpu_3d_cbs);
+#ifdef VIRGL_RENDERER_VENUS
+    flags |= VIRGL_RENDERER_VENUS | VIRGL_RENDERER_RENDER_SERVER;
+#endif
+
+    ret = virgl_renderer_init(g, flags, &virtio_gpu_3d_cbs);
     if (ret != 0) {
         error_report("virgl could not be initialized: %d", ret);
         return ret;
