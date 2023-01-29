@@ -207,6 +207,11 @@ struct VirtIOGPU {
     GHashTable *resource_uuids;
 
     uint32_t supported_capset_ids[4];
+
+    int read_pipe;
+    int write_pipe;
+
+    QemuMutex pipe_lock;
 };
 
 struct VirtIOGPUClass {
