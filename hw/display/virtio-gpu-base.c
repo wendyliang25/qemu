@@ -239,6 +239,7 @@ virtio_gpu_base_get_features(VirtIODevice *vdev, uint64_t features,
     if (virtio_gpu_resource_uuid_enabled(g->conf)) {
         features |= (1 << VIRTIO_GPU_F_RESOURCE_UUID);
     }
+    features |= (1 << VIRTIO_GPU_F_FENCE_PASSING);
 
     return features;
 }
@@ -246,7 +247,13 @@ virtio_gpu_base_get_features(VirtIODevice *vdev, uint64_t features,
 static void
 virtio_gpu_base_set_features(VirtIODevice *vdev, uint64_t features)
 {
+    VirtIOGPUBase *g = VIRTIO_GPU_BASE(vdev);
+
+    static const uint32_t fence_passing = (1 << VIRTIO_GPU_F_FENCE_PASSING);
     static const uint32_t virgl = (1 << VIRTIO_GPU_F_VIRGL);
+
+    if (features & fence_passing)
+        g->guest_fence_passing_enabled = true;
 
     trace_virtio_gpu_features(((features & virgl) == virgl));
 }
