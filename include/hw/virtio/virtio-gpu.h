@@ -205,6 +205,8 @@ struct VirtIOGPU {
     } dmabuf;
 
     GHashTable *resource_uuids;
+
+    uint32_t supported_capset_ids[4];
 };
 
 struct VirtIOGPUClass {
