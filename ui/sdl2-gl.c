@@ -26,6 +26,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/main-loop.h"
 #include "ui/console.h"
 #include "ui/input.h"
 #include "ui/sdl2.h"
@@ -223,6 +224,39 @@ void sdl2_gl_scanout_texture(DisplayChangeListener *dcl,
                          backing_id, false);
 }
 
+void sdl2_gl_scanout_dmabuf(DisplayChangeListener *dcl,
+                            QemuDmaBuf *dmabuf)
+{
+    struct sdl2_console *scon = container_of(dcl, struct sdl2_console, dcl);
+
+    assert(scon->opengl);
+    SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
+
+    egl_dmabuf_import_texture(dmabuf);
+    if (!dmabuf->texture) {
+        fprintf(stderr, "sdl2_gl_scanout_dmabuf failed fd=%d\n", dmabuf->fd);
+    }
+
+    sdl2_gl_scanout_texture(dcl, dmabuf->texture,
+                            false, dmabuf->width, dmabuf->height,
+                            0, 0, dmabuf->width, dmabuf->height);
+
+    if (dmabuf->allow_fences) {
+        scon->guest_fb.dmabuf = dmabuf;
+    }
+}
+
+void sdl2_gl_release_dmabuf(DisplayChangeListener *dcl,
+                            QemuDmaBuf *dmabuf)
+{
+    egl_dmabuf_release_texture(dmabuf);
+}
+
+bool sdl2_gl_has_dmabuf(DisplayChangeListener *dcl)
+{
+    return qemu_egl_has_dmabuf();
+}
+
 void sdl2_gl_scanout_flush(DisplayChangeListener *dcl,
                            uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 {
@@ -237,6 +271,7 @@ void sdl2_gl_scanout_flush(DisplayChangeListener *dcl,
         return;
     }
 
+    /* Drawing is synchronous here, so no need to use graphic_hw_gl_block. */
     SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
 
     SDL_GetWindowSize(scon->real_window, &ww, &wh);

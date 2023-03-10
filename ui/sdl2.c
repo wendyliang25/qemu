@@ -64,6 +64,7 @@ static Notifier mouse_mode_notifier;
 #endif
 
 static void sdl_update_caption(struct sdl2_console *scon);
+static void sdl2_enable_dmabuf_scanout(void);
 
 static struct sdl2_console *get_scon_from_window(uint32_t window_id)
 {
@@ -119,6 +120,11 @@ void sdl2_window_create(struct sdl2_console *scon)
     if (scon->opengl) {
         scon->winctx = SDL_GL_CreateContext(scon->real_window);
     }
+
+    qemu_egl_display = eglGetCurrentDisplay();
+    if (qemu_egl_has_dmabuf())
+        sdl2_enable_dmabuf_scanout();
+
     sdl_update_caption(scon);
 }
 
@@ -794,7 +800,7 @@ static const DisplayChangeListenerOps dcl_2d_ops = {
 };
 
 #ifdef CONFIG_OPENGL
-static const DisplayChangeListenerOps dcl_gl_ops = {
+static DisplayChangeListenerOps dcl_gl_ops = {
     .dpy_name                = "sdl2-gl",
     .dpy_gfx_update          = sdl2_gl_update,
     .dpy_gfx_switch          = sdl2_gl_switch,
@@ -806,7 +812,21 @@ static const DisplayChangeListenerOps dcl_gl_ops = {
     .dpy_gl_scanout_disable  = sdl2_gl_scanout_disable,
     .dpy_gl_scanout_texture  = sdl2_gl_scanout_texture,
     .dpy_gl_update           = sdl2_gl_scanout_flush,
+
+    /* Will be overriden from sdl2_window_create if dmabuf
+     * support is available.
+     */
+    .dpy_gl_scanout_dmabuf   = NULL,
+    .dpy_gl_release_dmabuf   = NULL,
+    .dpy_has_dmabuf          = NULL,
 };
+
+static void sdl2_enable_dmabuf_scanout(void)
+{
+    dcl_gl_ops.dpy_gl_scanout_dmabuf = sdl2_gl_scanout_dmabuf;
+    dcl_gl_ops.dpy_gl_release_dmabuf = sdl2_gl_release_dmabuf;
+    dcl_gl_ops.dpy_has_dmabuf        = sdl2_gl_has_dmabuf;
+}
 
 static bool
 sdl2_gl_is_compatible_dcl(DisplayGLCtx *dgc,
@@ -863,6 +883,8 @@ static void sdl2_display_init(DisplayState *ds, DisplayOptions *o)
     SDL_SetHint(SDL_HINT_ALLOW_ALT_TAB_WHILE_GRABBED, "0");
 #endif
     SDL_SetHint(SDL_HINT_WINDOWS_NO_CLOSE_ON_ALT_F4, "1");
+    SDL_SetHint(SDL_HINT_VIDEO_X11_FORCE_EGL, "1");
+
     memset(&info, 0, sizeof(info));
     SDL_VERSION(&info.version);
 
