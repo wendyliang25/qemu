@@ -21,6 +21,8 @@
 #include "hw/pci/pci_device.h"
 #include "hw/xen/trace.h"
 
+#include "exec/ramblock.h"
+
 extern xc_interface *xen_xc;
 
 /*
@@ -478,6 +480,68 @@ static inline void xen_map_memory_section(domid_t dom,
         return;
     }
 
+    if (section->mr->is_hostmem) {
+        domid_t gdom = dom;
+        domid_t hdom = 0;
+        xen_pfn_t *hpfns;
+        xen_pfn_t start_gpfn, *gpfns;
+        unsigned int nr_pfns = size >> XC_PAGE_SHIFT;
+        int i, rc, *errs;
+        void *hva = section->mr->ram_block->host + section->offset_within_region;
+        bool is_mmio = false;
+
+        hpfns = g_malloc(nr_pfns * sizeof(*hpfns));
+        gpfns = g_malloc(nr_pfns * sizeof(*gpfns));
+        errs = g_malloc(nr_pfns * sizeof(*errs));
+        if (!hpfns || !gpfns || !errs)
+            return;
+
+        start_gpfn = start_addr >> XC_PAGE_SHIFT;
+        for (i = 0; i < nr_pfns; i++)
+            gpfns[i] = start_gpfn + i;
+
+        rc = map_hva_to_gpfns(xen_fmem, hdom, gdom, nr_pfns,
+                              hva, gpfns, hpfns, 1);
+        if (rc) {
+            fprintf(stderr, "%s: map_hva_to_gpfns failed rc=%d\n", __func__, rc);
+            goto out;
+        }
+
+        /* Note: this function uses xen_add_to_physmap_batch, which can only
+         * store the number of pages to process in a uint16_t without checking
+         * if size is larger.
+         */
+        int page_done = 0;
+        for (int p = 0; p < DIV_ROUND_UP(size, (uint16_t)0xffff) && rc == 0; p++) {
+            int n = MIN(nr_pfns - page_done, (uint16_t)0xffff);
+            rc = xc_domain_add_to_physmap_batch(xen_xc, gdom, hdom,
+                                                XENMAPSPACE_gmfn_foreign,
+                                                n, &hpfns[page_done], &gpfns[page_done], &errs[page_done]);
+            for (i = 0; i < n; i++) {
+                if (errs[page_done + i]) {
+                    rc = errs[page_done + i];
+                    break;
+                }
+            }
+            page_done += n;
+        }
+
+  out:
+        fprintf(stderr, "%s: dom=%d fd=%d hva=%p gpfn=0x%lx hpfn=0x%lx size=0x%lx is_mmio=%d rc=%d\n",
+                __func__, dom, section->mr->ram_block->fd, hva, gpfns[0], hpfns[0], size, is_mmio, rc);
+
+        g_free(hpfns);
+        g_free(gpfns);
+        g_free(errs);
+
+        if (rc == 0)
+            return;
+        else
+            section->mr->is_hostmem = false;
+    }
+
+    fprintf(stderr, "Map (%s) via ioreqserver: dom=%d addr=0x%lx-0x%lx size=0x%lx\n",
+            section->mr->name, dom, start_addr, end_addr, size);
     trace_xen_map_mmio_range(ioservid, start_addr, end_addr);
     xendevicemodel_map_io_range_to_ioreq_server(xen_dmod, dom, ioservid, 1,
                                                 start_addr, end_addr);
@@ -490,11 +554,72 @@ static inline void xen_unmap_memory_section(domid_t dom,
     hwaddr start_addr = section->offset_within_address_space;
     ram_addr_t size = int128_get64(section->size);
     hwaddr end_addr = start_addr + size - 1;
+    int rc;
 
     if (use_default_ioreq_server) {
         return;
     }
 
+    if (section->mr->is_hostmem) {
+        xen_pfn_t start_gpfn = start_addr >> XC_PAGE_SHIFT;
+        unsigned int i, nr_pfns = size >> XC_PAGE_SHIFT;
+
+        for (i = 0; i < nr_pfns; i++) {
+            rc = xc_domain_remove_from_physmap(xen_xc, dom, start_gpfn + i);
+            if (rc) {
+                printf("xc_domain_remove_from_physmap failed %d/%d - rc=%d\n", i, nr_pfns, rc);
+                printf("    addr=0x%lx-0x%lx\n", start_addr, end_addr);
+                break;
+            }
+        }
+
+        rc = 0; /* Pretend everything went fine. */
+        goto out;
+
+        /* Success */
+        if (rc == 0) {
+            goto out;
+        } else {
+            xen_pfn_t *hpfns, *gpfns;
+            int *errs;
+            void *hva = section->mr->ram_block->host + section->offset_within_region;
+            domid_t hdom = 0;
+
+            hpfns = g_malloc(nr_pfns * sizeof(*hpfns));
+            gpfns = g_malloc(nr_pfns * sizeof(*gpfns));
+            errs = g_malloc(nr_pfns * sizeof(*errs));
+            if (!hpfns || !gpfns || !errs)
+                return;
+
+            for (i = 0; i < nr_pfns; i++)
+                gpfns[i] = start_gpfn + i;
+
+            rc = map_hva_to_gpfns(xen_fmem, hdom, dom, nr_pfns,
+                                  hva, gpfns, hpfns, 0);
+
+            if (rc) {
+                fprintf(stderr, "%s: map_hva_to_gpfns rc=%d\n", __func__, rc);
+                goto out;
+            }
+
+            /* Fallback. */
+            rc = xc_domain_memory_mapping(xen_xc, dom, gpfns[0], hpfns[0], nr_pfns, 0);
+            if (!rc)
+                rc = xc_domain_iomem_permission(xen_xc, dom, hpfns[0], nr_pfns, 0);
+
+            g_free(hpfns);
+            g_free(gpfns);
+            g_free(errs);
+    out:
+            fprintf(stderr, "%s: addr=0x%lx-0x%lx size=0x%lx rc=%d\n",
+                    __func__, start_addr, end_addr, size, rc);
+
+            return;
+        }
+    }
+
+    fprintf(stderr, "Unmap (%s) via ioreqserver: dom=%d addr=0x%lx-0x%lx size=0x%lx\n",
+            section->mr->name, dom, start_addr, end_addr, size);
     trace_xen_unmap_mmio_range(ioservid, start_addr, end_addr);
     xendevicemodel_unmap_io_range_from_ioreq_server(xen_dmod, dom, ioservid,
                                                     1, start_addr, end_addr);

@@ -763,6 +763,7 @@ struct MemoryRegion {
     bool nonvolatile;
     bool rom_device;
     bool flush_coalesced_mmio;
+    bool is_hostmem;
     uint8_t dirty_log_mask;
     bool is_iommu;
     RAMBlock *ram_block;

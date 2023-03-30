@@ -666,8 +666,12 @@ static void virgl_cmd_resource_map_blob(VirtIOGPU *g,
 
     vres->region = g_new0(MemoryRegion, 1);
     object_ref(OBJECT(g));
+    /* If a name is used, g will own mr so we don't have any refcount
+     * change here or in the unmap function.
+     */
     memory_region_init_ram_ptr(vres->region, OBJECT(vres->region), "blob",
                                size, data);
+    vres->region->is_hostmem = true;
     memory_region_add_subregion(&b->hostmem, mblob.offset, vres->region);
     memory_region_set_enabled(vres->region, true);
 

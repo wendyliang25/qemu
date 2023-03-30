@@ -797,7 +797,7 @@ static RAMBlock *qemu_get_ram_block(ram_addr_t addr)
     }
 
     fprintf(stderr, "Bad ram offset %" PRIx64 "\n", (uint64_t)addr);
-    abort();
+    abort(); //FIXME
 
 found:
     /* It is safe to write mru_block outside the iothread lock.  This
@@ -1789,6 +1789,11 @@ static void ram_block_add(RAMBlock *new_block, Error **errp)
     qemu_mutex_lock_ramlist();
     new_block->offset = find_ram_offset(new_block->max_length);
 
+    if (0)
+        fprintf(stderr, "%s: host=%p mr->name=%s old_ram_size=0x%lx"
+                " new_block->offset=0x%lx new_block->max_length=0x%lx\n",
+                __func__, (new_block->host)?:0, new_block->mr->name,
+                old_ram_size, new_block->offset, new_block->max_length);
     if (!new_block->host) {
         if (xen_enabled()) {
             xen_ram_alloc(new_block->offset, new_block->max_length,
@@ -1923,7 +1928,6 @@ RAMBlock *qemu_ram_alloc_from_fd(ram_addr_t size, MemoryRegion *mr,
         return NULL;
     }
     return new_block;
-
 }
 
 

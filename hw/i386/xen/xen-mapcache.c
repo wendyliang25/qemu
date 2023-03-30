@@ -60,6 +60,7 @@ typedef struct MapCacheEntry {
 } MapCacheEntry;
 
 typedef struct MapCacheRev {
+    hwaddr ram_addr;
     uint8_t *vaddr_req;
     hwaddr paddr_index;
     hwaddr size;
@@ -361,6 +362,7 @@ tryagain:
                     entry->paddr_index, entry->vaddr_base);
             abort();
         }
+        reventry->ram_addr = phys_addr;
         reventry->dma = dma;
         reventry->vaddr_req = mapcache->last_entry->vaddr_base + address_offset;
         reventry->paddr_index = mapcache->last_entry->paddr_index;
@@ -421,6 +423,13 @@ ram_addr_t xen_ram_addr_from_mapcache(void *ptr)
     } else {
         raddr = (reventry->paddr_index << MCACHE_BUCKET_SHIFT) +
              ((unsigned long) ptr - (unsigned long) entry->vaddr_base);
+        {
+            if (raddr != reventry->ram_addr) {
+                fprintf(stderr, "%s: raddr=0x%lx reventry->ram_addr=0x%lx\n",
+                        __func__, raddr, reventry->ram_addr);
+                raddr = reventry->ram_addr;
+            }
+        }
     }
     mapcache_unlock();
     return raddr;
@@ -466,6 +475,12 @@ static void xen_invalidate_map_cache_entry_unlocked(uint8_t *buffer)
         DPRINTF("Trying to unmap address %p that is not in the mapcache!\n", buffer);
         return;
     }
+
+    if (entry->lock == 0) {
+        fprintf(stderr, "underflow! paddr_index=0x%lx\n", paddr_index);
+        return;
+    }
+
     entry->lock--;
     if (entry->lock > 0 || pentry == NULL) {
         return;
@@ -502,9 +517,11 @@ void xen_invalidate_map_cache(void)
         if (!reventry->dma) {
             continue;
         }
+/*
         fprintf(stderr, "Locked DMA mapping while invalidating mapcache!"
                 " "HWADDR_FMT_plx" -> %p is present\n",
                 reventry->paddr_index, reventry->vaddr_req);
+*/
     }
 
     for (i = 0; i < mapcache->nr_buckets; i++) {
