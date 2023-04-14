@@ -71,6 +71,7 @@ static const VirtioPCIDeviceTypeInfo virtio_tee_pci_info = {
     .instance_init = virtio_tee_initfn,
     .class_init = virtio_tee_pci_class_init,
 };
+module_obj(TYPE_VIRTIO_TEE_PCI);
 
 static void virtio_tee_pci_register_types(void)
 {
