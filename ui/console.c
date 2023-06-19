@@ -1819,6 +1819,38 @@ void dpy_gfx_replace_surface(QemuConsole *con,
     qemu_free_displaysurface(old_surface);
 }
 
+void dpy_gfx_update_surface_with_blank(QemuConsole *con)
+{
+    static const char blank[] = "";
+    DisplaySurface *new_surface = NULL;
+    DisplaySurface *old_surface = con->surface;
+    DisplayChangeListener *dcl;
+    int w, h;
+
+    if (old_surface) {
+        w = surface_width(old_surface);
+        h = surface_height(old_surface);
+    } else {
+        w = 640;
+        h = 480;
+    }
+    new_surface = qemu_create_placeholder_surface(w, h, blank);
+
+    assert(old_surface != new_surface);
+
+    con->scanout.kind = SCANOUT_SURFACE;
+    con->surface = new_surface;
+    dpy_gfx_create_texture(con, new_surface);
+    QLIST_FOREACH(dcl, &con->ds->listeners, next) {
+        if (con != (dcl->con ? dcl->con : active_console)) {
+            continue;
+        }
+        displaychangelistener_gfx_switch(dcl, new_surface, TRUE);
+    }
+    dpy_gfx_destroy_texture(con, old_surface);
+    qemu_free_displaysurface(old_surface);
+}
+
 bool dpy_gfx_check_format(QemuConsole *con,
                           pixman_format_code_t format)
 {
