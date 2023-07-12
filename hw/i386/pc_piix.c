@@ -66,6 +66,7 @@
 #include "hw/hyperv/vmbus-bridge.h"
 #include "hw/mem/nvdimm.h"
 #include "hw/i386/acpi-build.h"
+#include "hw/i386/fw_cfg.h"
 #include "kvm/kvm-cpu.h"
 
 #define MAX_IDE_BUS 2
@@ -213,6 +214,11 @@ static void pc_init1(MachineState *machine,
         if (machine->kernel_filename != NULL) {
             /* For xen HVM direct kernel boot, load linux here */
             xen_load_linux(pcms);
+        }
+        else {
+            FWCfgState *fw_cfg;
+            fw_cfg = fw_cfg_init_io(FW_CFG_IO_BASE);
+            rom_set_fw(fw_cfg);
         }
     }
 
