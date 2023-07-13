@@ -100,6 +100,12 @@ void sdl2_window_create(struct sdl2_console *scon)
     }
 #endif
 
+#if defined(SDL_WINDOW_VM_MULTI_CONSOLE_SHIFT)
+    if (scon->idx > 0) {
+        flags |= scon->idx << SDL_WINDOW_VM_MULTI_CONSOLE_SHIFT;
+    }
+#endif
+
     scon->real_window = SDL_CreateWindow("", SDL_WINDOWPOS_UNDEFINED,
                                          SDL_WINDOWPOS_UNDEFINED,
                                          surface_width(scon->surface),
