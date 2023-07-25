@@ -526,6 +526,20 @@ static inline void xen_map_memory_section(domid_t dom,
             page_done += n;
         }
 
+	if (!rc)
+	    goto out;
+
+	rc = xc_domain_iomem_permission(xen_xc, gdom, hpfns[0], nr_pfns, 1);
+	if (rc)
+	    goto out;
+
+	rc = xc_domain_memory_mapping(xen_xc, gdom, gpfns[0], hpfns[0],
+				      nr_pfns, 1);
+	if (rc)
+	    xc_domain_iomem_permission(xen_xc, gdom, hpfns[0], nr_pfns, 0);
+	else
+	    is_mmio = true;
+
   out:
         fprintf(stderr, "%s: dom=%d fd=%d hva=%p gpfn=0x%lx hpfn=0x%lx size=0x%lx is_mmio=%d rc=%d\n",
                 __func__, dom, section->mr->ram_block->fd, hva, gpfns[0], hpfns[0], size, is_mmio, rc);
