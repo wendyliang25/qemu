@@ -764,6 +764,7 @@ struct MemoryRegion {
     bool rom_device;
     bool flush_coalesced_mmio;
     bool is_hostmem;
+    bool is_mmio;
     uint8_t dirty_log_mask;
     bool is_iommu;
     RAMBlock *ram_block;
