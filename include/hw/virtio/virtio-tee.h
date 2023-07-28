@@ -87,6 +87,7 @@ enum virtio_tee_flags {
     VIRTIO_TEE_FLAG_SESSION_ENABLED = 1,
     VIRTIO_TEE_FLAG_INVOKE_ENABLED,
     VIRTIO_TEE_FLAG_CANCEL_ENABLED,
+    VIRTIO_TEE_FLAG_DLM_ENABLED,
 };
 
 #define virtio_tee_session_enabled(_flags) \
@@ -95,6 +96,8 @@ enum virtio_tee_flags {
     (_flags & (1 << VIRTIO_TEE_FLAG_INVOKE_ENABLED))
 #define virtio_tee_cancel_enabled(_flags) \
     (_flags & (1 << VIRTIO_TEE_FLAG_CANCEL_ENABLED))
+#define virtio_tee_dlm_enabled(_flags) \
+    (_flags & (1 << VIRTIO_TEE_FLAG_DLM_ENABLED))
 
 void virtio_tee_reset(VirtIODevice *vdev);
 

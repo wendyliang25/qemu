@@ -1,4 +1,4 @@
-/*
+ /*
  * Virtio TEE Device
  *
  * Copyright 2022 Advanced Micro Devices, Inc.
@@ -32,6 +32,11 @@
 #include "qemu/bswap.h"
 #include "sysemu/dma.h"
 #include "virtio-tee-client.h"
+#include "dlm_api.h"
+
+bool g_dlm_enabled = false;
+
+struct DLM_Context g_dlm_context;
 
 static inline void
 virtio_tee_cmd_hdr_bswap(struct virtio_tee_hdr *hdr)
@@ -340,6 +345,16 @@ static void virtio_tee_open_device(VirtIOTEE *t,
     }
 
     virtio_tee_cmd_response(t, cmd, &open_dev.hdr, sizeof(open_dev));
+
+    if (g_dlm_enabled && fd >= 0 && g_dlm_context.state == DLM_STATE_SESSION_STOPPED){
+        g_dlm_context.fd = fd;
+
+        TEEC_Result res = dlm_get_debug_token(g_dlm_context.fd);
+
+        if (res == TEEC_SUCCESS) {
+            g_dlm_context.state = DLM_STATE_GOT_DEBUG_TOKEN;
+        }
+    }
 }
 
 static void virtio_tee_close_device(VirtIOTEE *t,
@@ -522,6 +537,14 @@ end:
     resp.ret = cpu_to_le32(ret);
     resp.ret_origin = cpu_to_le32(ret_origin);
     virtio_tee_cmd_response(t, cmd, &resp.hdr, sizeof(resp));
+
+    if (g_dlm_enabled && g_dlm_context.state == DLM_STATE_GOT_DEBUG_TOKEN) {
+        TEEC_Result res = dlm_start_session(&g_dlm_context, &os_cmd.uuid[0]);
+
+        if (res == TEEC_SUCCESS){
+            g_dlm_context.state = DLM_STATE_SESSION_STARTED;
+        }
+    }
 }
 
 static void virtio_tee_close_session(VirtIOTEE *t,
@@ -538,6 +561,11 @@ static void virtio_tee_close_session(VirtIOTEE *t,
 
     session.ctx = &ctx;
     session.session_id = le32_to_cpu(close_session.session);
+
+    if (g_dlm_enabled && g_dlm_context.state == DLM_STATE_SESSION_STARTED){
+        dlm_stop_session(&g_dlm_context);
+        g_dlm_context.state = DLM_STATE_SESSION_STOPPED;
+    }
 
     teec_close_session(&session);
 }
@@ -722,6 +750,14 @@ void virtio_tee_reset(VirtIODevice *vdev)
     t->processing_cmdq = false;
 }
 
+static void virtio_tee_initialize_dlm(VirtIOTEE *t)
+{
+    if (virtio_tee_dlm_enabled(t->flags)) {
+        g_dlm_enabled = true;
+    }
+    g_dlm_context.state = DLM_STATE_SESSION_STOPPED;
+}
+
 static void virtio_tee_device_realize(DeviceState *qdev, Error **errp)
 {
     VirtIODevice *vdev = VIRTIO_DEVICE(qdev);
@@ -744,6 +780,8 @@ static void virtio_tee_device_realize(DeviceState *qdev, Error **errp)
     t->cmd_bh = qemu_bh_new(virtio_tee_cmd_bh, t);
 
     QTAILQ_INIT(&t->cmdq);
+
+    virtio_tee_initialize_dlm(t);
 }
 
 static void virtio_tee_device_unrealize(DeviceState *qdev)
@@ -757,6 +795,8 @@ static Property virtio_tee_properties[] = {
                     VIRTIO_TEE_FLAG_INVOKE_ENABLED, true),
     DEFINE_PROP_BIT("cancel", VirtIOTEE, flags,
                     VIRTIO_TEE_FLAG_CANCEL_ENABLED, false),
+    DEFINE_PROP_BIT("dlm", VirtIOTEE, flags,
+                    VIRTIO_TEE_FLAG_DLM_ENABLED, false),
     DEFINE_PROP_END_OF_LIST(),
 };
 

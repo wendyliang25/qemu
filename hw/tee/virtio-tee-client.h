@@ -44,6 +44,8 @@
 
 #define TEEC_MAX_DEV_SEQ        10
 
+#define DLM_MAX_STRING_LEN  256
+
 /**
  * Flag constants indicating the type of parameters encoded inside the
  * operation payload (TEEC_Operation), Type is uint32_t.
@@ -381,6 +383,46 @@ typedef struct {
     TEEC_Session *session;
 } TEEC_Operation;
 
+enum DLM_State
+{
+    DLM_STATE_SESSION_STOPPED = 0,
+    DLM_STATE_SESSION_STARTED,
+    DLM_STATE_GOT_DEBUG_TOKEN,
+};
+
+typedef uint32_t DLM_SessionID;
+
+typedef struct DLM_Context {
+    int fd;
+    enum DLM_State state;
+    DLM_SessionID id;
+} DLM_Context;
+
+/**
+ * struct DLM_DebugToken - Structure to transfer debug authentication token
+ * between client application and Secure OS
+ *
+ * @param buffer    Pointer to debug token buffer
+ *
+ * @param size      Size of debug token buffer in bytes
+ */
+typedef struct {
+    uint8_t *buffer;
+    uint32_t size;
+} DLM_DebugToken;
+
+/**
+ * struct DLM_String - Structure to fetch debug string from TA
+ *
+ * @param dlm_string    The DLM string if 'is_valid' is 'true'
+ *
+ * @param is_valid   True if dlm_string holds the DLM string else false.
+ */
+typedef struct {
+    uint8_t dlm_string[DLM_MAX_STRING_LEN];
+    bool is_valid;
+} DLM_String;
+
 int teec_open_device(uint32_t *gen_caps);
 
 void teec_close_device(int fd);
@@ -405,4 +447,16 @@ TEEC_Result teec_invoke_command(TEEC_Session *session, uint32_t cmd_id,
 
 TEEC_Result teec_allocate_shared_memory(TEEC_Context *ctx,
                                         TEEC_SharedMemory *shm);
+
+TEEC_Result teec_dlm_get_debug_token(int fd, DLM_DebugToken *token);
+
+TEEC_Result teec_dlm_start_ta_debug(DLM_Context *dlm_ctx,
+                                    const uint8_t ta_uuid[],
+                                    const DLM_DebugToken *token);
+
+TEEC_Result teec_dlm_fetch_debug_strings(int fd, DLM_SessionID id,
+                                         DLM_String *string);
+
+TEEC_Result teec_dlm_stop_ta_debug(DLM_Context *dlm_ctx);
+
 #endif

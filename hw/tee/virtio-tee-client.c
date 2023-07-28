@@ -36,6 +36,7 @@
 #include <sys/mman.h>
 #include <pthread.h>
 #include "qemu/osdep.h"
+#include "standard-headers/linux/virtio_tee_dlm.h"
 #include "virtio-tee-client.h"
 
 #ifndef PATH_MAX
@@ -823,4 +824,134 @@ out:
         *error_origin = eorig;
     }
     return res;
+}
+
+TEEC_Result teec_dlm_get_debug_token(int fd, DLM_DebugToken *token)
+{
+    struct tee_ioctl_get_debug_token_data arg;
+    int rc;
+
+    if (!token)
+        return TEEC_ERROR_BAD_PARAMETERS;
+
+    if (!token->buffer && token->size > 0)
+        return TEEC_ERROR_BAD_PARAMETERS;
+
+    arg.debug_token      = (uintptr_t)token->buffer;
+    arg.debug_token_size = token->size;
+
+    rc = ioctl(fd, TEE_IOC_DLM_GET_DEBUG_TOKEN, &arg);
+    if (rc) {
+        printf("TEE_IOC_DLM_GET_DEBUG_TOKEN failed");
+        token->size = 0;
+        return ioctl_errno_to_res(errno);
+    }
+
+    if (arg.debug_token_size > token->size) {
+        token->size = arg.debug_token_size;
+        printf("SHORT BUFFER: %u bytes needed", token->size);
+        return TEEC_ERROR_SHORT_BUFFER;
+    }
+
+    if (TEEC_SUCCESS == arg.ret) {
+        token->size = arg.debug_token_size;
+        printf("Generated Debug token size = %u", token->size);
+    } else {
+        token->size = 0;
+        printf("status = 0x%x\n", arg.ret);
+    }
+
+    return arg.ret;
+}
+
+TEEC_Result teec_dlm_start_ta_debug(DLM_Context *dlm_ctx,
+                                    const uint8_t ta_uuid[],
+                                    const DLM_DebugToken *token)
+{
+    struct tee_ioctl_start_ta_debug_data arg;
+    int rc;
+
+    if (!dlm_ctx || !ta_uuid || !token || !token->buffer || token->size <= 0)
+        return TEEC_ERROR_BAD_PARAMETERS;
+
+    arg.debug_token_size = token->size;
+    arg.debug_token      = (uintptr_t)token->buffer;
+
+    memcpy(arg.ta_uuid, ta_uuid, 16);
+    printf("%x\n", ta_uuid[0]);
+
+    rc = ioctl(dlm_ctx->fd, TEE_IOC_DLM_START_TA_DEBUG, &arg);
+    if (rc) {
+        printf("TEE_IOC_DLM_START_TA_DEBUG failed");
+        return ioctl_errno_to_res (errno);
+    }
+
+    if (TEEC_SUCCESS == arg.ret) {
+        dlm_ctx->id = arg.dlm_session_id;
+        printf("DLM session id = %u", dlm_ctx->id);
+    } else {
+        printf("status = 0x%x", arg.ret);
+    }
+
+    return arg.ret;
+}
+
+TEEC_Result teec_dlm_fetch_debug_strings(int fd, DLM_SessionID id, DLM_String *string)
+{
+    struct tee_ioctl_fetch_debug_strings_data arg;
+    int rc;
+
+    if (!fd || !string)
+        return TEEC_ERROR_BAD_PARAMETERS;
+
+    if (id <= 0) {
+        printf("invalid DLM session id");
+        return TEEC_ERROR_BAD_PARAMETERS;
+    }
+
+    string->is_valid = false;
+    arg.dlm_session_id = id;
+
+    rc = ioctl(fd, TEE_IOC_DLM_FETCH_DEBUG_STRING, &arg);
+    if (rc) {
+        printf("TEE_IOC_DLM_FETCH_DEBUG_STRING failed\n");
+        return ioctl_errno_to_res(errno);
+    }
+
+    if (TEEC_SUCCESS == arg.ret) {
+        if (1 == arg.is_valid_string) {
+            memcpy(string->dlm_string, arg.string, sizeof (arg.string));
+            string->is_valid = true;
+        }
+    } else {
+        printf("status = 0x%x", arg.ret);
+    }
+
+    return arg.ret;
+}
+
+TEEC_Result teec_dlm_stop_ta_debug(DLM_Context *dlm_ctx)
+{
+    struct tee_ioctl_stop_ta_debug_data arg;
+    int rc;
+
+    if (!dlm_ctx)
+        return TEEC_ERROR_BAD_PARAMETERS;
+
+    if (dlm_ctx->id <= 0) {
+        printf("invalid DLM session id");
+        return TEEC_ERROR_BAD_PARAMETERS;
+    }
+
+    arg.dlm_session_id = dlm_ctx->id;
+
+    rc = ioctl(dlm_ctx->fd, TEE_IOC_DLM_STOP_TA_DEBUG, &arg);
+    if (rc) {
+        printf("TEE_IOC_DLM_STOP_TA_DEBUG failed");
+        return ioctl_errno_to_res(errno);
+    }
+
+    printf("status = 0x%x", arg.ret);
+
+    return arg.ret;
 }

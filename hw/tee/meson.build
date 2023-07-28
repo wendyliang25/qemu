@@ -3,7 +3,7 @@ hw_tee_modules = {}
 if config_all_devices.has_key('CONFIG_VIRTIO_TEE')
   virtio_tee_ss = ss.source_set()
   virtio_tee_ss.add(when: 'CONFIG_VIRTIO_TEE',
-                    if_true: [files('virtio-tee.c', 'virtio-tee-client.c')])
+                    if_true: [files('virtio-tee.c', 'virtio-tee-client.c', 'dlm.c' )])
   hw_tee_modules += {'virtio-tee': virtio_tee_ss}
 endif
 
