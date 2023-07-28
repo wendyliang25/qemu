@@ -468,6 +468,8 @@ static inline int xen_set_ioreq_server_state(domid_t dom,
 
 static bool use_default_ioreq_server;
 
+static bool reuse_hva_hpfn_mapping = true;
+
 static inline void xen_map_memory_section(domid_t dom,
                                           ioservid_t ioservid,
                                           MemoryRegionSection *section)
@@ -483,19 +485,20 @@ static inline void xen_map_memory_section(domid_t dom,
     if (section->mr->is_hostmem) {
         domid_t gdom = dom;
         domid_t hdom = 0;
-        xen_pfn_t *hpfns;
-        xen_pfn_t start_gpfn, *gpfns;
+        xen_pfn_t start_gpfn, *gpfns, *hpfns;
         unsigned int nr_pfns = size >> XC_PAGE_SHIFT;
         int i, rc, *errs;
         void *hva = section->mr->ram_block->host + section->offset_within_region;
+        section->mr->is_mmio = false;
 
-	section->mr->is_mmio = false;
         section->mr->hpfns = g_malloc(nr_pfns * sizeof(*hpfns));
-	hpfns = section->mr->hpfns;
+        hpfns = section->mr->hpfns;
         gpfns = g_malloc(nr_pfns * sizeof(*gpfns));
         errs = g_malloc(nr_pfns * sizeof(*errs));
-        if (!hpfns || !gpfns || !errs)
+        if (!hpfns || !gpfns || !errs) {
+            fprintf(stderr, "%s: mem alloc failed\n", __FUNCTION__);
             return;
+        }
 
         start_gpfn = start_addr >> XC_PAGE_SHIFT;
         for (i = 0; i < nr_pfns; i++)
@@ -527,24 +530,34 @@ static inline void xen_map_memory_section(domid_t dom,
             page_done += n;
         }
 
-	if (!rc)
-	    goto out;
+        if (rc == 0) /* Success */
+          goto out;
 
-	rc = xc_domain_iomem_permission(xen_xc, gdom, hpfns[0], nr_pfns, 1);
-	if (rc)
-	    goto out;
+        rc = 0;
 
-	rc = xc_domain_memory_mapping(xen_xc, gdom, gpfns[0], hpfns[0],
-				      nr_pfns, 1);
-	if (rc)
-	    xc_domain_iomem_permission(xen_xc, gdom, hpfns[0], nr_pfns, 0);
-	else
-	    section->mr->is_mmio = true;
+        for (int i = 0; i < nr_pfns && rc == 0; i++) {
+          rc = xc_domain_iomem_permission(xen_xc, gdom, hpfns[i], 1, 1);
+          if (rc)
+            printf("xc_domain_iomem_permission failed\n");
+          else
+            rc = xc_domain_memory_mapping(xen_xc, gdom, gpfns[i], hpfns[i], 1, 1);
+          if (rc)
+            printf("xc_domain_memory_mapping failed\n");
+        }
+        section->mr->is_mmio = true;
 
-  out:
-        fprintf(stderr, "%s: dom=%d fd=%d hva=%p gpfn=0x%lx hpfn=0x%lx size=0x%lx is_mmio=%d rc=%d\n",
-                __func__, dom, section->mr->ram_block->fd, hva, gpfns[0],
-		hpfns[0], size, section->mr->is_mmio, rc);
+out:
+        if (rc)
+            printf("%s: hva=%p gpfn=[0x%lx, 0x%lx] hpfn=[0x%lx, 0x%lx] is_mmio=%d rc=%d\n",
+                    __func__, hva,
+                    gpfns[0], gpfns[nr_pfns - 1],
+                    hpfns[0], hpfns[nr_pfns - 1],
+                    section->mr->is_mmio, rc);
+
+        if (reuse_hva_hpfn_mapping)
+            section->mr->hpfns = hpfns;
+        else
+            g_free(hpfns);
 
         g_free(gpfns);
         g_free(errs);
@@ -578,69 +591,74 @@ static inline void xen_unmap_memory_section(domid_t dom,
     if (section->mr->is_hostmem) {
         xen_pfn_t start_gpfn = start_addr >> XC_PAGE_SHIFT;
         unsigned int i, nr_pfns = size >> XC_PAGE_SHIFT;
+        void *hva = section->mr->ram_block->host + section->offset_within_region;
 
-	if (!section->mr->is_mmio) {
-	    for (i = 0; i < nr_pfns; i++) {
+        if (!section->mr->is_mmio) {
+            for (i = 0; i < nr_pfns; i++) {
                 rc = xc_domain_remove_from_physmap(xen_xc, dom, start_gpfn + i);
                 if (rc) {
-                    printf("xc_domain_remove_from_physmap failed %d/%d - rc=%d\n", i, nr_pfns, rc);
-                    printf("    addr=0x%lx-0x%lx\n", start_addr, end_addr);
-                    break;
+                   printf("xc_domain_remove_from_physmap failed %d/%d - rc=%d\n", i, nr_pfns, rc);
+                   printf("    addr=0x%lx-0x%lx\n", start_addr, end_addr);
+                   break;
                 }
             }
 
-            rc = 0; /* Pretend everything went fine. */
-            goto out;
-        } else {
-            xen_pfn_t *hpfns, *gpfns;
-            int *errs;
-            void *hva = section->mr->ram_block->host + section->offset_within_region;
-            domid_t hdom = 0;
+            /* Pretend everything went fine. */
+            if (reuse_hva_hpfn_mapping)
+               g_free(section->mr->hpfns);
 
-	    hpfns = section->mr->hpfns;
+            if (rc)
+                printf("%s: hva=%p gpfn=[0x%lx, 0x%lx] is_mmio=0 rc=%d %s\n", __func__, hva,
+                       start_gpfn, start_gpfn + nr_pfns - 1,
+                       rc, rc == 0 ? "" : "(ignored)");
+        } else {
+            domid_t gdom = dom;
+            domid_t hdom = 0;
+            xen_pfn_t *gpfns, *hpfns;
+            int *errs;
+
+            hpfns =
+               reuse_hva_hpfn_mapping ? section->mr->hpfns : g_malloc(nr_pfns * sizeof(*hpfns));
             gpfns = g_malloc(nr_pfns * sizeof(*gpfns));
             errs = g_malloc(nr_pfns * sizeof(*errs));
             if (!hpfns || !gpfns || !errs)
-                return;
+               return;
 
             for (i = 0; i < nr_pfns; i++)
-                gpfns[i] = start_gpfn + i;
+               gpfns[i] = start_gpfn + i;
 
-#if 0
-	    /*
-	     * FIXME:
-	     *
-	     * If the memory address type is mmio, it's unable to get hpfns with
-	     * map_hva_to_gpfns ioctl call. So store the hpfns while it does
-	     * xen_map_memory_section.
-	     *
-	     * privcmd_ioctl_map_hva_to_gpfns: vma for hva=0x7fac6f700000 not
-	     * found
-	     */
-            rc = map_hva_to_gpfns(xen_fmem, hdom, dom, nr_pfns,
-                                  hva, gpfns, hpfns, 0);
-
-            if (rc) {
-                fprintf(stderr, "%s: map_hva_to_gpfns rc=%d\n", __func__, rc);
-                goto out;
+            if (reuse_hva_hpfn_mapping) {
+               rc = 0;
+            } else {
+               rc = map_hva_to_gpfns(xen_fmem, hdom, gdom, nr_pfns, hva, gpfns, hpfns, 1);
             }
-#endif
 
-            /* Fallback. */
-            rc = xc_domain_memory_mapping(xen_xc, dom, gpfns[0], hpfns[0], nr_pfns, 0);
-            if (!rc)
-                rc = xc_domain_iomem_permission(xen_xc, dom, hpfns[0], nr_pfns, 0);
+            for (int i = 0; i < nr_pfns && rc == 0; i++) {
+               rc = xc_domain_memory_mapping(xen_xc, dom, gpfns[i], hpfns[i], 1, 0);
+               if (rc == 0) {
+                  rc = xc_domain_iomem_permission(xen_xc, dom, hpfns[i], 1, 0);
+                  if (rc)
+                     printf("xc_domain_iomem_permission [%d] gpfn=0x%lx hpfn=0x%lx failed\n", i,
+                            gpfns[i], hpfns[i]);
+               } else {
+                  printf("xc_domain_memory_mapping [%d] gpfn=0x%lx hpfn=0x%lx failed\n", i,
+                         gpfns[i], hpfns[i]);
+               }
+            }
+
+            if (rc)
+                printf("%s: hva=%p gpfn=[0x%lx, 0x%lx] hpfn=[0x%lx, 0x%lx] is_mmio=%d rc=%d\n",
+                       __func__, hva,
+                       gpfns[0], gpfns[nr_pfns - 1],
+                       hpfns[0], hpfns[nr_pfns - 1],
+                       section->mr->is_mmio, rc);
 
             g_free(section->mr->hpfns);
-	    section->mr->hpfns = NULL;
+            section->mr->hpfns = NULL;
             g_free(gpfns);
             g_free(errs);
-    out:
-            fprintf(stderr, "%s: addr=0x%lx-0x%lx size=0x%lx rc=%d\n",
-                    __func__, start_addr, end_addr, size, rc);
-
-            return;
         }
+        return;
     }
 
     fprintf(stderr, "Unmap (%s) via ioreqserver: dom=%d addr=0x%lx-0x%lx size=0x%lx\n",
