@@ -490,7 +490,8 @@ static inline void xen_map_memory_section(domid_t dom,
         void *hva = section->mr->ram_block->host + section->offset_within_region;
 
 	section->mr->is_mmio = false;
-        hpfns = g_malloc(nr_pfns * sizeof(*hpfns));
+        section->mr->hpfns = g_malloc(nr_pfns * sizeof(*hpfns));
+	hpfns = section->mr->hpfns;
         gpfns = g_malloc(nr_pfns * sizeof(*gpfns));
         errs = g_malloc(nr_pfns * sizeof(*errs));
         if (!hpfns || !gpfns || !errs)
@@ -545,7 +546,6 @@ static inline void xen_map_memory_section(domid_t dom,
                 __func__, dom, section->mr->ram_block->fd, hva, gpfns[0],
 		hpfns[0], size, section->mr->is_mmio, rc);
 
-        g_free(hpfns);
         g_free(gpfns);
         g_free(errs);
 
@@ -597,7 +597,7 @@ static inline void xen_unmap_memory_section(domid_t dom,
             void *hva = section->mr->ram_block->host + section->offset_within_region;
             domid_t hdom = 0;
 
-            hpfns = g_malloc(nr_pfns * sizeof(*hpfns));
+	    hpfns = section->mr->hpfns;
             gpfns = g_malloc(nr_pfns * sizeof(*gpfns));
             errs = g_malloc(nr_pfns * sizeof(*errs));
             if (!hpfns || !gpfns || !errs)
@@ -606,6 +606,17 @@ static inline void xen_unmap_memory_section(domid_t dom,
             for (i = 0; i < nr_pfns; i++)
                 gpfns[i] = start_gpfn + i;
 
+#if 0
+	    /*
+	     * FIXME:
+	     *
+	     * If the memory address type is mmio, it's unable to get hpfns with
+	     * map_hva_to_gpfns ioctl call. So store the hpfns while it does
+	     * xen_map_memory_section.
+	     *
+	     * privcmd_ioctl_map_hva_to_gpfns: vma for hva=0x7fac6f700000 not
+	     * found
+	     */
             rc = map_hva_to_gpfns(xen_fmem, hdom, dom, nr_pfns,
                                   hva, gpfns, hpfns, 0);
 
@@ -613,13 +624,15 @@ static inline void xen_unmap_memory_section(domid_t dom,
                 fprintf(stderr, "%s: map_hva_to_gpfns rc=%d\n", __func__, rc);
                 goto out;
             }
+#endif
 
             /* Fallback. */
             rc = xc_domain_memory_mapping(xen_xc, dom, gpfns[0], hpfns[0], nr_pfns, 0);
             if (!rc)
                 rc = xc_domain_iomem_permission(xen_xc, dom, hpfns[0], nr_pfns, 0);
 
-            g_free(hpfns);
+            g_free(section->mr->hpfns);
+	    section->mr->hpfns = NULL;
             g_free(gpfns);
             g_free(errs);
     out:
