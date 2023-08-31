@@ -99,4 +99,6 @@ void sdl2_gl_release_dmabuf(DisplayChangeListener *dcl,
                             QemuDmaBuf *dmabuf);
 bool sdl2_gl_has_dmabuf(DisplayChangeListener *dcl);
 
+void sdl2_gl_set_hdcp(DisplayChangeListener *dcl, uint32_t type, uint32_t mode);
+
 #endif /* SDL2_H */

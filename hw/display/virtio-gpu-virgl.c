@@ -265,6 +265,22 @@ static void virgl_cmd_resource_flush(VirtIOGPU *g,
     }
 }
 
+static void virgl_cmd_set_hdcp(VirtIOGPU *g,
+                               struct virtio_gpu_ctrl_command *cmd)
+{
+    struct virtio_gpu_hdcp gh;
+
+    VIRTIO_GPU_FILL_CMD(gh);
+    if (gh.scanout_id >= g->parent_obj.conf.max_outputs) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: illegal scanout id specified %d",
+                      __func__, gh.scanout_id);
+        cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_SCANOUT_ID;
+        return;
+    }
+    dpy_gl_set_hdcp(g->parent_obj.scanout[gh.scanout_id].con, gh.hdcp_content_type,
+                    gh.content_protection);
+}
+
 static void virgl_cmd_set_scanout(VirtIOGPU *g,
                                   struct virtio_gpu_ctrl_command *cmd)
 {
@@ -931,6 +947,9 @@ void virtio_gpu_virgl_process_cmd(VirtIOGPU *g,
         virgl_cmd_set_scanout_blob(g, cmd);
         break;
 #endif /* HAVE_VIRGL_RESOURCE_BLOB */
+    case VIRTIO_GPU_CMD_STATUS_HDCP:
+        virgl_cmd_set_hdcp(g, cmd);
+        break;
     default:
         cmd->error = VIRTIO_GPU_RESP_ERR_UNSPEC;
         break;

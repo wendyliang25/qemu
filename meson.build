@@ -998,6 +998,10 @@ endif
 sdl = not_found
 if not get_option('sdl').auto() or have_system
   sdl = dependency('sdl2', required: get_option('sdl'), kwargs: static_kwargs)
+  if sdl.found()
+    config_host_data.set('HAVE_SDL_SETHDCP',
+                         cc.has_function('SDL_SetWindowProtectedMode', dependencies: sdl))
+  endif
   sdl_image = not_found
 endif
 if sdl.found()

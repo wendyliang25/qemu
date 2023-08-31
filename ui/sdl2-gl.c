@@ -280,3 +280,17 @@ void sdl2_gl_scanout_flush(DisplayChangeListener *dcl,
 
     SDL_GL_SwapWindow(scon->real_window);
 }
+
+void sdl2_gl_set_hdcp(DisplayChangeListener *dcl, uint32_t type, uint32_t mode)
+{
+#ifdef HAVE_SDL_SETHDCP
+    struct sdl2_console *scon = container_of(dcl, struct sdl2_console, dcl);
+
+    assert(scon->real_window);
+    SDL_SetWindowProtectedMode(scon->real_window, SDL_RELAXED);
+    if (mode == 0)
+        SDL_SetWindowProtectedType(scon->real_window, SDL_HDCP_UNPROTECTED);
+    else
+        SDL_SetWindowProtectedType(scon->real_window, type);
+#endif
+}

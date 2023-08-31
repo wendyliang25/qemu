@@ -2116,6 +2116,20 @@ void dpy_gl_update(QemuConsole *con,
     graphic_hw_gl_block(con, false);
 }
 
+void dpy_gl_set_hdcp(QemuConsole *con, uint32_t type, uint32_t mode)
+{
+    DisplayState *s = con->ds;
+    DisplayChangeListener *dcl;
+
+    QLIST_FOREACH(dcl, &s->listeners, next) {
+        if (con != (dcl->con ? dcl->con : active_console)) {
+            continue;
+        }
+        if (dcl->ops->dpy_gl_set_hdcp) {
+            dcl->ops->dpy_gl_set_hdcp(dcl, type, mode);
+        }
+    }
+}
 /***********************************************************/
 /* register display */
 

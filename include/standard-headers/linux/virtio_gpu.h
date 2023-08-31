@@ -121,6 +121,10 @@ enum virtio_gpu_ctrl_type {
 	VIRTIO_GPU_RESP_ERR_INVALID_RESOURCE_ID,
 	VIRTIO_GPU_RESP_ERR_INVALID_CONTEXT_ID,
 	VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER,
+
+	/* AMD commands */
+	VIRTIO_GPU_CMD_STATUS_HDCP= 0x1301,
+
 };
 
 enum virtio_gpu_shm_id {
@@ -206,6 +210,14 @@ struct virtio_gpu_set_scanout {
 	struct virtio_gpu_rect r;
 	uint32_t scanout_id;
 	uint32_t resource_id;
+};
+
+/* VIRTIO_GPU_CMD_SET_HDCP_STATUS */
+struct virtio_gpu_hdcp {
+    struct virtio_gpu_ctrl_hdr hdr;
+    uint32_t scanout_id;
+    uint32_t hdcp_content_type;
+    uint32_t content_protection;
 };
 
 /* VIRTIO_GPU_CMD_RESOURCE_FLUSH */
