@@ -193,6 +193,8 @@ static VGPUDMABuf
     dmabuf->buf.allow_fences = true;
     dmabuf->buf.draw_submitted = false;
     dmabuf->scanout_id = scanout_id;
+    dmabuf->buf.protected = res->protected;
+
     QTAILQ_INSERT_HEAD(&g->dmabuf.bufs, dmabuf, next);
 
     return dmabuf;

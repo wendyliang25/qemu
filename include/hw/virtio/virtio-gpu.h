@@ -58,6 +58,8 @@ struct virtio_gpu_simple_resource {
     void* pfns_mapped;
     uint32_t npfns;
 
+    bool protected;
+
     QTAILQ_ENTRY(virtio_gpu_simple_resource) next;
 };
 

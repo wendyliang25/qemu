@@ -310,6 +310,11 @@ void egl_dmabuf_import_texture(QemuDmaBuf *dmabuf)
     attrs[i++] = dmabuf->stride;
     attrs[i++] = EGL_DMA_BUF_PLANE0_OFFSET_EXT;
     attrs[i++] = 0;
+    /* printf("CREATE SCANOUT: protected: %d\n", dmabuf->protected); */
+    if (dmabuf->protected) {
+        attrs[i++] = EGL_PROTECTED_CONTENT_EXT;
+        attrs[i++] = dmabuf->protected;
+    }
 #ifdef EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT
     if (dmabuf->modifier) {
         attrs[i++] = EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT;

@@ -188,6 +188,7 @@ typedef struct QemuDmaBuf {
     int       fence_fd;
     bool      allow_fences;
     bool      draw_submitted;
+    bool      protected;
 } QemuDmaBuf;
 
 enum display_scanout {
