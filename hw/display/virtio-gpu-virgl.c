@@ -1093,6 +1093,12 @@ static void virgl_write_fence(void *opaque, uint32_t fence)
         return virgl_write_fence_async(g, fence);
 
     QTAILQ_FOREACH_SAFE(cmd, &g->fenceq, next, tmp) {
+        /* Only process ctx0 fences here. */
+        if (cmd->cmd_hdr.ctx_id != 0)
+            continue;
+
+        assert (cmd->cmd_hdr.ring_idx == 0);
+
         /*
          * the guest can end up emitting fences out of order
          * so we should check all fenced cmds not just the first one.
