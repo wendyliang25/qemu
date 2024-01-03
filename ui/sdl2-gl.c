@@ -465,6 +465,8 @@ void sdl2_gl_scanout_flush(DisplayChangeListener *dcl,
                            uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 {
     struct sdl2_console *scon = container_of(dcl, struct sdl2_console, dcl);
+    struct SDL_WindowEglSurfaceData *data = SDL_GetWindowData(scon->real_window,
+                                                              SDL_WINDOWEGLSURFACEDATA);
     int ww, wh;
 
     assert(scon->opengl);
@@ -474,6 +476,9 @@ void sdl2_gl_scanout_flush(DisplayChangeListener *dcl,
     if (!scon->guest_fb.framebuffer) {
         return;
     }
+
+    if (data && data->current_frame_state != scon->guest_fb.dmabuf->protected)
+        data->frame_need_protected = scon->guest_fb.dmabuf->protected;
 
     /* Drawing is synchronous here, so no need to use graphic_hw_gl_block. */
     SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
