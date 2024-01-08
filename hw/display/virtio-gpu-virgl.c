@@ -527,6 +527,15 @@ static void virgl_cmd_ctx_detach_resource(VirtIOGPU *g,
                                         det_res.resource_id);
 
     virgl_renderer_ctx_detach_resource(det_res.hdr.ctx_id, det_res.resource_id);
+
+    struct virtio_gpu_simple_resource *res = virtio_gpu_find_resource(g, det_res.resource_id);
+
+    if (res && res->pfns_mapped && res->npfns)
+    {
+        virtio_gpu_cleanup_mapping_pfns(g, res->pfns_mapped, res->npfns);
+        res->pfns_mapped = NULL;
+        res->npfns = 0;
+    }
 }
 
 static void virgl_cmd_get_capset_info(VirtIOGPU *g,
@@ -608,10 +617,15 @@ static void virgl_cmd_resource_create_blob(VirtIOGPU *g,
     vres->res.blob_size = cblob.size;
 
     if (cblob.blob_mem != VIRTIO_GPU_BLOB_MEM_HOST3D) {
-        ret = virtio_gpu_create_mapping_iov(g, cblob.nr_entries, sizeof(cblob),
-                                            cmd, &vres->res.addrs,
-                                            &vres->res.iov, &vres->res.iov_cnt);
-        if (!ret) {
+        if(cblob.blob_flags & VIRTIO_GPU_BLOB_FLAG_USE_USERPTR) {
+            ret = virtio_gpu_create_mapping_pfns(g, cblob.nr_entries, sizeof(cblob),
+                                        cmd, &vres->res.pfns_mapped, &vres->res.npfns, &cblob);
+        } else {
+            ret = virtio_gpu_create_mapping_iov(g, cblob.nr_entries, sizeof(cblob),
+                                        cmd, &vres->res.addrs,
+                                        &vres->res.iov, &vres->res.iov_cnt);
+        }
+        if (ret != 0) {
             g_free(vres);
             cmd->error = VIRTIO_GPU_RESP_ERR_UNSPEC;
             return;
@@ -628,6 +642,7 @@ static void virgl_cmd_resource_create_blob(VirtIOGPU *g,
     virgl_args.size = cblob.size;
     virgl_args.iovecs = vres->res.iov;
     virgl_args.num_iovs = vres->res.iov_cnt;
+    virgl_args.guest_blob_mapped = (cblob.blob_flags & VIRTIO_GPU_BLOB_FLAG_USE_USERPTR) ? vres->res.pfns_mapped : NULL;
 
     ret = virgl_renderer_resource_create_blob(&virgl_args);
     if (ret) {

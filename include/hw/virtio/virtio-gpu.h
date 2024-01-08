@@ -55,6 +55,9 @@ struct virtio_gpu_simple_resource {
     int dmabuf_fd;
     uint8_t *remapped;
 
+    void* pfns_mapped;
+    uint32_t npfns;
+
     QTAILQ_ENTRY(virtio_gpu_simple_resource) next;
 };
 
@@ -304,6 +307,14 @@ void virtio_gpu_simple_process_cmd(VirtIOGPU *g, struct virtio_gpu_ctrl_command 
 void virtio_gpu_update_cursor_data(VirtIOGPU *g,
                                    struct virtio_gpu_scanout *s,
                                    uint32_t resource_id);
+int virtio_gpu_create_mapping_pfns(VirtIOGPU *g,
+                                  uint32_t nr_entries, uint32_t offset,
+                                  struct virtio_gpu_ctrl_command *cmd,
+                                  void **pfns_mapped,
+                                  uint32_t *npfns,
+                                  struct virtio_gpu_resource_create_blob *cblob);
+void virtio_gpu_cleanup_mapping_pfns(VirtIOGPU *g,
+                                    void* pfns_mapped, uint32_t npfns);
 
 /* virtio-gpu-udmabuf.c */
 bool virtio_gpu_have_udmabuf(void);

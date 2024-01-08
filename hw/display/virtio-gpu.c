@@ -30,6 +30,7 @@
 #include "qemu/module.h"
 #include "qapi/error.h"
 #include "qemu/error-report.h"
+#include "exec/cpu-common.h"
 
 #define VIRTIO_GPU_VM_VERSION 1
 
@@ -773,6 +774,58 @@ static void virtio_gpu_set_scanout_blob(VirtIOGPU *g,
 
     virtio_gpu_do_set_scanout(g, ss.scanout_id,
                               &fb, res, &ss.r, &cmd->error);
+}
+
+int virtio_gpu_create_mapping_pfns(VirtIOGPU *g,
+                                  uint32_t nr_entries, uint32_t offset,
+                                  struct virtio_gpu_ctrl_command *cmd,
+                                  void **pfns_mapped,
+                                  uint32_t *npfns,
+                                  struct virtio_gpu_resource_create_blob *cblob)
+{
+    if (!nr_entries) {
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: No pfns\n",
+                      __func__);
+        return -1;
+    }
+
+    unsigned long *pfns;
+    size_t esize, s;
+
+    esize = sizeof(*pfns) * nr_entries;
+    pfns = g_malloc(esize);
+    s = iov_to_buf(cmd->elem.out_sg, cmd->elem.out_num,
+                   offset, pfns, esize);
+
+    if (s != esize) {
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: command data size incorrect %zu vs %zu\n",
+                      __func__, s, esize);
+        g_free(pfns);
+        return -1;
+    }
+
+    *pfns_mapped = qemu_map_pfns_ptr(pfns, nr_entries);
+    *npfns = nr_entries;
+    if (!*pfns_mapped) {
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: Failed to map guest userptr\n",
+                      __func__);
+        g_free(pfns);
+        return -1;
+    }
+
+    g_free(pfns);
+    return 0;
+}
+
+void virtio_gpu_cleanup_mapping_pfns(VirtIOGPU *g,
+                                    void* pfns_mapped, uint32_t npfns)
+{
+    if (pfns_mapped == NULL || npfns == 0)
+        return;
+    qemu_unmap_pfns_ptr(pfns_mapped, npfns);
 }
 
 int virtio_gpu_create_mapping_iov(VirtIOGPU *g,
