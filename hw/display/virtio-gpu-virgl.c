@@ -972,7 +972,7 @@ static int virtio_gpu_virgl_fence_write(VirtIOGPU *g, uint64_t value)
 
 static void virtio_gpu_virgl_fence_event(void *opaque)
 {
-    struct virtio_gpu_ctrl_command *cmd;
+    struct virtio_gpu_ctrl_command *cmd, *tmp;
     VirtIOGPU *g = opaque;
     uint64_t fence;
 
@@ -983,7 +983,7 @@ static void virtio_gpu_virgl_fence_event(void *opaque)
     }
 
     while (!virtio_gpu_virgl_fence_read(g, &fence)) {
-        QTAILQ_FOREACH(cmd, &g->fenceq, next) {
+        QTAILQ_FOREACH_SAFE(cmd, &g->fenceq, next, tmp) {
             /*
              * the guest can end up emitting fences out of order
              * so we should check all fenced cmds not just the first one.
@@ -1091,7 +1091,7 @@ static void virgl_write_fence(void *opaque, uint32_t fence)
 
 static void virtio_gpu_virgl_context_fence_event(void *opaque)
 {
-    struct virtio_gpu_ctrl_command *cmd;
+    struct virtio_gpu_ctrl_command *cmd, *tmp;
     VirtIOGPU *g = opaque;
     uint64_t fence_id;
     uint64_t queue_id;
@@ -1106,7 +1106,7 @@ static void virtio_gpu_virgl_context_fence_event(void *opaque)
 
     while (!virtio_gpu_virgl_read_context_fence(g, &ctx_id, &queue_id,
                                                 &fence_id, &ctx_fence)) {
-        QTAILQ_FOREACH(cmd, &g->fenceq, next) {
+        QTAILQ_FOREACH_SAFE(cmd, &g->fenceq, next, tmp) {
             /*
              * the guest can end up emitting fences out of order
              * so we should check all fenced cmds not just the first one.
