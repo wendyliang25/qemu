@@ -163,6 +163,7 @@ static void virtio_gpu_free_dmabuf(VirtIOGPU *g, VGPUDMABuf *dmabuf)
     scanout = &g->parent_obj.scanout[dmabuf->scanout_id];
     dpy_gl_release_dmabuf(scanout->con, &dmabuf->buf);
     QTAILQ_REMOVE(&g->dmabuf.bufs, dmabuf, next);
+    close(dmabuf->buf.fd);
     g_free(dmabuf);
 }
 
@@ -188,7 +189,7 @@ static VGPUDMABuf
     dmabuf->buf.scanout_width = r->width;
     dmabuf->buf.scanout_height = r->height;
     dmabuf->buf.fourcc = qemu_pixman_to_drm_format(fb->format);
-    dmabuf->buf.fd = res->dmabuf_fd;
+    dmabuf->buf.fd = qemu_dup(res->dmabuf_fd);
     dmabuf->buf.allow_fences = true;
     dmabuf->buf.draw_submitted = false;
     dmabuf->scanout_id = scanout_id;

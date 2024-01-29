@@ -728,6 +728,7 @@ static void virgl_cmd_set_scanout_blob(VirtIOGPU *g,
     struct virtio_gpu_set_scanout_blob ss;
     struct virgl_renderer_resource_info info;
     uint64_t fbend;
+    int transient_fd = 0;
 
     VIRTIO_GPU_FILL_CMD(ss);
     virtio_gpu_scanout_blob_bswap(&ss);
@@ -780,8 +781,21 @@ static void virgl_cmd_set_scanout_blob(VirtIOGPU *g,
         cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_RESOURCE_ID;
         return;
     }
-    if (!vres->res.dmabuf_fd && info.fd)
-        vres->res.dmabuf_fd = info.fd;
+
+    if (!vres->res.dmabuf_fd) {
+        if (info.fd >= 0) {
+            vres->res.dmabuf_fd = info.fd;
+        } else {
+            uint32_t fd_type;
+            if (virgl_renderer_resource_export_blob(ss.resource_id, &fd_type, &transient_fd) == 0 &&
+                fd_type == VIRGL_RENDERER_BLOB_FD_TYPE_DMABUF) {
+                vres->res.dmabuf_fd = transient_fd;
+            } else {
+                close(transient_fd);
+                transient_fd = 0;
+            }
+        }
+    }
 
     fb.format = virtio_gpu_get_pixman_format(ss.format);
     if (!fb.format) {
@@ -815,9 +829,17 @@ static void virgl_cmd_set_scanout_blob(VirtIOGPU *g,
         qemu_log_mask(LOG_GUEST_ERROR,
                       "%s: failed to update dmabuf\n", __func__);
         cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER;
+        if (vres->res.dmabuf_fd == transient_fd) {
+            vres->res.dmabuf_fd = 0;
+            close(transient_fd);
+        }
         return;
     }
     virtio_gpu_update_scanout(g, ss.scanout_id, &vres->res, &ss.r);
+    if (vres->res.dmabuf_fd == transient_fd) {
+        vres->res.dmabuf_fd = 0;
+        close(transient_fd);
+    }
 }
 
 #endif /* HAVE_VIRGL_RESOURCE_BLOB */
