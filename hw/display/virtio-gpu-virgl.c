@@ -14,6 +14,7 @@
 #include "qemu/osdep.h"
 #include "qemu/error-report.h"
 #include "qemu/iov.h"
+#include "qemu/drm.h"
 #include "trace.h"
 #include "hw/virtio/virtio.h"
 #include "hw/virtio/virtio-gpu.h"
@@ -22,7 +23,8 @@
 
 #include "ui/egl-helpers.h"
 
-#include "ui/egl-helpers.h"
+/* Needs unstable APIs for CAPSET_DRM */
+#define VIRGL_RENDERER_UNSTABLE_APIS 1
 
 #include <virglrenderer.h>
 
@@ -1284,7 +1286,14 @@ int virtio_gpu_virgl_init(VirtIOGPU *g)
     flags |= VIRGL_RENDERER_VENUS | VIRGL_RENDERER_RENDER_SERVER;
 #endif
 
+#ifdef VIRGL_RENDERER_DRM
+    /* Override other flags for now. */
+    if (virtio_gpu_native_context_enabled(g->parent_obj.conf))
+        flags = VIRGL_RENDERER_ASYNC_FENCE_CB | VIRGL_RENDERER_DRM;
+#endif
+
     ret = virgl_renderer_init(g, flags, &virtio_gpu_3d_cbs);
+
     if (ret != 0) {
         error_report("virgl could not be initialized: %d", ret);
         return ret;
@@ -1334,6 +1343,14 @@ int virtio_gpu_virgl_get_num_capsets(VirtIOGPU *g)
                                &capset2_max_size);
     if (capset2_max_size) {
         g->supported_capset_ids[num_capsets] = VIRTIO_GPU_CAPSET_VENUS;
+        num_capsets++;
+    }
+
+    virgl_renderer_get_cap_set(VIRTIO_GPU_CAPSET_DRM,
+                               &capset2_max_ver,
+                               &capset2_max_size);
+    if (capset2_max_size) {
+        g->supported_capset_ids[num_capsets] = VIRTIO_GPU_CAPSET_DRM;
         num_capsets++;
     }
 

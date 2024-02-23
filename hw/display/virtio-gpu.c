@@ -1707,6 +1707,8 @@ static Property virtio_gpu_properties[] = {
 #ifdef HAVE_VIRGL_CONTEXT_CREATE_WITH_FLAGS
     DEFINE_PROP_BIT("context_init", VirtIOGPU, parent_obj.conf.flags,
                     VIRTIO_GPU_FLAG_CONTEXT_INIT_ENABLED, true),
+    DEFINE_PROP_BIT("native_context", VirtIOGPU, parent_obj.conf.flags,
+                    VIRTIO_GPU_FLAG_NATIVE_CONTEXT_ENABLED, true),
 #endif
     DEFINE_PROP_END_OF_LIST(),
 };

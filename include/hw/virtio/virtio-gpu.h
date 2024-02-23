@@ -92,6 +92,7 @@ enum virtio_gpu_base_conf_flags {
     VIRTIO_GPU_FLAG_BLOB_ENABLED,
     VIRTIO_GPU_FLAG_CONTEXT_INIT_ENABLED,
     VIRTIO_GPU_FLAG_RESOURCE_UUID_ENABLED,
+    VIRTIO_GPU_FLAG_NATIVE_CONTEXT_ENABLED,
 };
 
 #define virtio_gpu_virgl_enabled(_cfg) \
@@ -110,6 +111,9 @@ enum virtio_gpu_base_conf_flags {
     (_cfg.flags & (1 << VIRTIO_GPU_FLAG_RESOURCE_UUID_ENABLED))
 #define virtio_gpu_hostmem_enabled(_cfg) \
     (_cfg.hostmem > 0)
+#define virtio_gpu_native_context_enabled(_cfg) \
+    ((_cfg.flags & (1 << VIRTIO_GPU_FLAG_NATIVE_CONTEXT_ENABLED) && \
+     virtio_gpu_hostmem_enabled(_cfg) && virtio_gpu_context_init_enabled(_cfg)))
 
 struct virtio_gpu_base_conf {
     uint32_t max_outputs;
