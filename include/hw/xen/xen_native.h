@@ -466,9 +466,18 @@ static inline int xen_set_ioreq_server_state(domid_t dom,
 /* Xen 4.5 */
 #else
 
-static bool use_default_ioreq_server;
+#define DYN_HVA_MAPPING
 
+#ifdef DYN_HVA_MAPPING
+static inline void xen_update_hva(unsigned long hva, size_t npages)
+{
+    privcmd_update_hva(xen_fmem, hva, npages);
+}
+#else
 static bool reuse_hva_hpfn_mapping = true;
+#endif
+
+static bool use_default_ioreq_server;
 
 static inline void xen_map_memory_section(domid_t dom,
                                           ioservid_t ioservid,
@@ -482,6 +491,21 @@ static inline void xen_map_memory_section(domid_t dom,
         return;
     }
 
+#ifdef DYN_HVA_MAPPING
+    if (section->mr->is_hostmem) {
+        void *hva = section->mr->ram_block->host + section->offset_within_region;
+        xen_pfn_t gfn = start_addr >> XC_PAGE_SHIFT;
+        unsigned int npages = DIV_ROUND_UP(size, XC_PAGE_SIZE);
+        int rc;
+
+        fprintf(stderr, "New Hostmem Map (%s) via ioreqserver: dom=%d addr=0x%lx-0x%lx size=0x%lx\n",
+                section->mr->name, dom, start_addr, end_addr, size);
+        rc = privcmd_map_hva(xen_fmem, xen_domid, (unsigned long)hva, gfn, npages, true);
+        if (rc) {
+            fprintf(stderr, "%s: New Hostmem Map rc=%d\n", __func__, rc);
+        }
+    }
+#else
     if (section->mr->is_hostmem) {
         domid_t gdom = dom;
         domid_t hdom = 0;
@@ -490,6 +514,9 @@ static inline void xen_map_memory_section(domid_t dom,
         int i, rc, *errs;
         void *hva = section->mr->ram_block->host + section->offset_within_region;
         section->mr->is_mmio = false;
+
+        fprintf(stderr, "Hostmem Map (%s) via ioreqserver: dom=%d addr=0x%lx-0x%lx size=0x%lx\n",
+                section->mr->name, dom, start_addr, end_addr, size);
 
         section->mr->hpfns = g_malloc(nr_pfns * sizeof(*hpfns));
         hpfns = section->mr->hpfns;
@@ -533,6 +560,10 @@ static inline void xen_map_memory_section(domid_t dom,
         if (rc == 0) /* Success */
           goto out;
 
+        fprintf(stderr, "%s: WE SHOULD NOT BE HERE\n", __func__);
+        assert(false);
+
+        /* TODO: undo the successful xc_domain_add_to_physmap_batch part */
         rc = 0;
 
         for (int i = 0; i < nr_pfns && rc == 0; i++) {
@@ -567,6 +598,7 @@ out:
         else
             section->mr->is_hostmem = false;
     }
+#endif /* DYN_HVA_MAPPING */
 
     fprintf(stderr, "Map (%s) via ioreqserver: dom=%d addr=0x%lx-0x%lx size=0x%lx\n",
             section->mr->name, dom, start_addr, end_addr, size);
@@ -588,16 +620,46 @@ static inline void xen_unmap_memory_section(domid_t dom,
         return;
     }
 
+#ifdef DYN_HVA_MAPPING
+    if (section->mr->is_hostmem) {
+        void *hva = section->mr->ram_block->host + section->offset_within_region;
+        xen_pfn_t gfn = start_addr >> XC_PAGE_SHIFT;
+        unsigned int npages = DIV_ROUND_UP(size, XC_PAGE_SIZE);
+
+        fprintf(stderr, "New Hostmem Unmap (%s) via ioreqserver: dom=%d addr=0x%lx-0x%lx size=0x%lx\n",
+                section->mr->name, dom, start_addr, end_addr, size);
+
+        rc = privcmd_map_hva(xen_fmem, xen_domid, (unsigned long)hva, gfn, npages, false);
+        if (rc) {
+            fprintf(stderr, "%s: New Hostmem Unmap failed rc=%d\n", __func__, rc);
+        }
+    }
+#else
     if (section->mr->is_hostmem) {
         xen_pfn_t start_gpfn = start_addr >> XC_PAGE_SHIFT;
         unsigned int i, nr_pfns = size >> XC_PAGE_SHIFT;
         void *hva = section->mr->ram_block->host + section->offset_within_region;
 
+        fprintf(stderr, "Hostmem Unmap (%s) via ioreqserver: dom=%d addr=0x%lx-0x%lx size=0x%lx\n",
+                section->mr->name, dom, start_addr, end_addr, size);
+
         if (!section->mr->is_mmio) {
             for (i = 0; i < nr_pfns; i++) {
-                rc = xc_domain_remove_from_physmap(xen_xc, dom, start_gpfn + i);
+                domid_t gdom = dom;
+                domid_t hdom = 0;
+                xen_pfn_t mfn = (~0UL);
+                xen_pfn_t gpfn = start_gpfn + i;
+                int err = 0;
+
+                rc = xc_domain_add_to_physmap_batch(xen_xc, gdom, hdom,
+                                             XENMAPSPACE_gmfn_foreign,
+                                             1, &mfn, &gpfn, &err);
+                if (err)
+                    fprintf(stderr, "unmap gpfn=0x%lx done err=%d mfn=0x%lx \n",
+                            gpfn, err, mfn);
                 if (rc) {
-                   printf("xc_domain_remove_from_physmap failed %d/%d - rc=%d\n", i, nr_pfns, rc);
+                   printf("xc_domain_add_to_physmap_batch with INVAL PFN "
+                          "failed %d/%d - rc=%d\n", i, nr_pfns, rc);
                    printf("    addr=0x%lx-0x%lx\n", start_addr, end_addr);
                    break;
                 }
@@ -616,6 +678,9 @@ static inline void xen_unmap_memory_section(domid_t dom,
             domid_t hdom = 0;
             xen_pfn_t *gpfns, *hpfns;
             int *errs;
+
+            fprintf(stderr, "%s: WE SHOULD NOT BE HERE\n", __func__);
+            assert(false);
 
             hpfns =
                reuse_hva_hpfn_mapping ? section->mr->hpfns : g_malloc(nr_pfns * sizeof(*hpfns));
@@ -660,6 +725,7 @@ static inline void xen_unmap_memory_section(domid_t dom,
         }
         return;
     }
+#endif /* DYN_HVA_MAPPING */
 
     fprintf(stderr, "Unmap (%s) via ioreqserver: dom=%d addr=0x%lx-0x%lx size=0x%lx\n",
             section->mr->name, dom, start_addr, end_addr, size);
@@ -734,8 +800,8 @@ static inline void xen_unmap_pcidev(domid_t dom,
                                                   PCI_FUNC(pci_dev->devfn));
 }
 
-static inline void xen_create_ioreq_server(domid_t dom,
-                                           ioservid_t *ioservid)
+static inline int xen_create_ioreq_server(domid_t dom,
+                                          ioservid_t *ioservid)
 {
     int rc = xendevicemodel_create_ioreq_server(xen_dmod, dom,
                                                 HVM_IOREQSRV_BUFIOREQ_ATOMIC,
@@ -743,12 +809,14 @@ static inline void xen_create_ioreq_server(domid_t dom,
 
     if (rc == 0) {
         trace_xen_ioreq_server_create(*ioservid);
-        return;
+        return rc;
     }
 
     *ioservid = 0;
     use_default_ioreq_server = true;
     trace_xen_default_ioreq_server();
+
+    return rc;
 }
 
 static inline void xen_destroy_ioreq_server(domid_t dom,

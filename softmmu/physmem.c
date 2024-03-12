@@ -35,6 +35,7 @@
 #include "hw/qdev-core.h"
 #include "hw/qdev-properties.h"
 #include "hw/boards.h"
+#include "hw/xen/xen_native.h"
 #include "hw/xen/xen.h"
 #include "sysemu/kvm.h"
 #include "sysemu/tcg.h"
@@ -2649,6 +2650,13 @@ static MemTxResult flatview_write_continue(FlatView *fv, hwaddr addr,
             ram_ptr = qemu_ram_ptr_length(mr->ram_block, addr1, &l, false);
             memmove(ram_ptr, buf, l);
             invalidate_and_set_dirty(mr, addr1, l);
+#ifdef DYN_HVA_MAPPING
+            if (xen_enabled() && mr->is_hostmem) {
+                unsigned long hva = (unsigned long)ram_ptr & TARGET_PAGE_MASK;
+                unsigned int npages = DIV_ROUND_UP(l, TARGET_PAGE_SIZE);
+                xen_update_hva(hva, npages);
+            }
+#endif
         }
 
         if (release_lock) {
@@ -2716,6 +2724,13 @@ MemTxResult flatview_read_continue(FlatView *fv, hwaddr addr,
             /* RAM case */
             ram_ptr = qemu_ram_ptr_length(mr->ram_block, addr1, &l, false);
             memcpy(buf, ram_ptr, l);
+#ifdef DYN_HVA_MAPPING
+            if (xen_enabled() && mr->is_hostmem) {
+                unsigned long hva = (unsigned long)ram_ptr & TARGET_PAGE_MASK;
+                unsigned int npages = DIV_ROUND_UP(l, TARGET_PAGE_SIZE);
+                xen_update_hva(hva, npages);
+            }
+#endif
         }
 
         if (release_lock) {
