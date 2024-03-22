@@ -53,6 +53,7 @@ if config_all_devices.has_key('CONFIG_QXL')
                                            pixman, spice])
   qxl_ss.add(when: 'CONFIG_ACPI', if_true: files('acpi-vga.c'),
                                   if_false: files('acpi-vga-stub.c'))
+  qxl_ss.add(when: gbm, if_true: gbm)
   hw_display_modules += {'qxl': qxl_ss}
 endif
 

@@ -1672,6 +1672,13 @@ if not get_option('libdw').auto() or \
                        required: get_option('libdw'))
 endif
 
+# libdrm
+drm_include = ''
+drm = dependency('libdrm', method: 'pkg-config', required: false)
+if drm.found()
+  drm_include = drm.get_variable(pkgconfig: 'includedir')
+endif
+
 #################
 # config-host.h #
 #################
@@ -1983,7 +1990,7 @@ config_host_data.set('CONFIG_EPOLL', cc.has_header('sys/epoll.h'))
 config_host_data.set('CONFIG_LINUX_MAGIC_H', cc.has_header('linux/magic.h'))
 config_host_data.set('CONFIG_VALGRIND_H', cc.has_header('valgrind/valgrind.h'))
 config_host_data.set('HAVE_BTRFS_H', cc.has_header('linux/btrfs.h'))
-config_host_data.set('HAVE_DRM_H', cc.has_header('libdrm/drm.h'))
+config_host_data.set('HAVE_DRM_H', cc.has_header('libdrm/drm.h', include_directories: include_directories(drm_include)))
 config_host_data.set('HAVE_PTY_H', cc.has_header('pty.h'))
 config_host_data.set('HAVE_SYS_DISK_H', cc.has_header('sys/disk.h'))
 config_host_data.set('HAVE_SYS_IOCCOM_H', cc.has_header('sys/ioccom.h'))
