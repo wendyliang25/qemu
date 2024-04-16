@@ -32,4 +32,5 @@ xen_ss = ss.source_set()
 xen_ss.add(when: 'CONFIG_XEN', if_true: files(
   'xen-mapcache.c',
   'xen-hvm-common.c',
+  'xen-pvh-common.c',
 ))

@@ -31,36 +31,23 @@
 #include "sysemu/block-backend.h"
 #include "sysemu/tpm_backend.h"
 #include "sysemu/sysemu.h"
-#include "hw/xen/xen-hvm-common.h"
+#include "hw/xen/xen-pvh-common.h"
 #include "sysemu/tpm.h"
 #include "hw/xen/arch_hvm.h"
 
 #define TYPE_XEN_ARM  MACHINE_TYPE_NAME("xenpvh")
 OBJECT_DECLARE_SIMPLE_TYPE(XenArmState, XEN_ARM)
 
-static const MemoryListener xen_memory_listener = {
-    .region_add = xen_region_add,
-    .region_del = xen_region_del,
-    .log_start = NULL,
-    .log_stop = NULL,
-    .log_sync = NULL,
-    .log_global_start = NULL,
-    .log_global_stop = NULL,
-    .priority = MEMORY_LISTENER_PRIORITY_ACCEL,
-};
-
 struct XenArmState {
     /*< private >*/
     MachineState parent;
 
-    XenIOState *state;
+    XenPVHCommonState pvh;
 
     struct {
         uint64_t tpm_base_addr;
     } cfg;
 };
-
-static MemoryRegion ram_lo, ram_hi;
 
 /*
  * VIRTIO_MMIO_DEV_SIZE is imported from tools/libs/light/libxl_arm.c under Xen
@@ -172,20 +159,15 @@ static void xen_enable_tpm(XenArmState *xam)
 
 static void xen_arm_init(MachineState *machine)
 {
+    MemoryRegion *sysmem = get_system_memory();
     XenArmState *xam = XEN_ARM(machine);
 
-    xam->state =  g_new0(XenIOState, 1);
+    xam->pvh.cfg.ram_low.base = GUEST_RAM0_BASE;
+    xam->pvh.cfg.ram_low.size = GUEST_RAM0_SIZE;
+    xam->pvh.cfg.ram_high.base = GUEST_RAM1_BASE;
+    xam->pvh.cfg.ram_high.size = GUEST_RAM1_SIZE;
 
-    if (machine->ram_size == 0) {
-        DPRINTF("ram_size not specified. QEMU machine started without IOREQ"
-                "(no emulated devices including Virtio)\n");
-        return;
-    }
-
-    xen_init_ram(machine);
-
-    xen_register_ioreq(xam->state, machine->smp.cpus, &xen_memory_listener);
-
+    xen_pvh_common_init(machine, &xam->pvh, sysmem);
     xen_create_virtio_mmio_devices(xam);
 
 #ifdef CONFIG_TPM
