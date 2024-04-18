@@ -614,7 +614,7 @@ static inline void xen_unmap_memory_section(domid_t dom,
     hwaddr start_addr = section->offset_within_address_space;
     ram_addr_t size = int128_get64(section->size);
     hwaddr end_addr = start_addr + size - 1;
-    int rc;
+    int rc = 0;
 
     if (use_default_ioreq_server) {
         return;
@@ -644,33 +644,51 @@ static inline void xen_unmap_memory_section(domid_t dom,
                 section->mr->name, dom, start_addr, end_addr, size);
 
         if (!section->mr->is_mmio) {
-            for (i = 0; i < nr_pfns; i++) {
-                domid_t gdom = dom;
-                domid_t hdom = 0;
-                xen_pfn_t mfn = (~0UL);
-                xen_pfn_t gpfn = start_gpfn + i;
-                int err = 0;
+            xen_pfn_t *gpfns, *mfns;
+            domid_t gdom = dom;
+            domid_t hdom = 0;
+            int *errs;
 
-                rc = xc_domain_add_to_physmap_batch(xen_xc, gdom, hdom,
-                                             XENMAPSPACE_gmfn_foreign,
-                                             1, &mfn, &gpfn, &err);
-                if (err)
-                    fprintf(stderr, "unmap gpfn=0x%lx done err=%d mfn=0x%lx \n",
-                            gpfn, err, mfn);
-                if (rc) {
-                   printf("xc_domain_add_to_physmap_batch with INVAL PFN "
-                          "failed %d/%d - rc=%d\n", i, nr_pfns, rc);
-                   printf("    addr=0x%lx-0x%lx\n", start_addr, end_addr);
-                   break;
-                }
+            gpfns = g_malloc(nr_pfns * sizeof(*gpfns));
+            mfns = g_malloc(nr_pfns * sizeof(*mfns));
+            errs = g_malloc(nr_pfns * sizeof(*errs));
+            if (!gpfns || !mfns || !errs)
+                return;
+            memset(mfns, 0xff, nr_pfns * sizeof(*mfns));
+            memset(errs, 0, nr_pfns * sizeof(*errs));
+
+            for (i = 0; i < nr_pfns; i++)
+                gpfns[i] = start_gpfn + i;
+
+            int page_done = 0;
+            for (int p = 0; p < DIV_ROUND_UP(nr_pfns, (uint16_t)0xffff); p++) {
+                int n = MIN(nr_pfns - page_done, (uint16_t)0xffff);
+                rc = xc_domain_add_to_physmap_batch(
+                    xen_xc, gdom, hdom, XENMAPSPACE_gmfn_foreign,
+                    n, &mfns[page_done], &gpfns[page_done], &errs[page_done]);
+                if (rc)
+                    break;
+                page_done += n;
+            }
+
+            if (rc) {
+                printf("xc_domain_add_to_physmap_batch (unmap) %d/%d - rc=%d\n",
+                       i, nr_pfns, rc);
+                printf("    addr=0x%lx-0x%lx\n", start_addr, end_addr);
             }
 
             /* Pretend everything went fine. */
-            if (reuse_hva_hpfn_mapping)
+            if (reuse_hva_hpfn_mapping) {
                g_free(section->mr->hpfns);
+               section->mr->hpfns = NULL;
+            }
+            g_free(gpfns);
+            g_free(mfns);
+            g_free(errs);
 
             if (rc)
-                printf("%s: hva=%p gpfn=[0x%lx, 0x%lx] is_mmio=0 rc=%d %s\n", __func__, hva,
+                printf("%s: hva=%p gpfn=[0x%lx, 0x%lx] rc=%d %s\n",
+                       __func__, hva,
                        start_gpfn, start_gpfn + nr_pfns - 1,
                        rc, rc == 0 ? "" : "(ignored)");
         } else {
