@@ -2648,19 +2648,15 @@ static MemTxResult flatview_write_continue(FlatView *fv, hwaddr addr,
         } else {
             /* RAM case */
             ram_ptr = qemu_ram_ptr_length(mr->ram_block, addr1, &l, false);
-
+            memmove(ram_ptr, buf, l);
+            invalidate_and_set_dirty(mr, addr1, l);
 #ifdef DYN_HVA_MAPPING
             if (xen_enabled() && mr->is_hostmem) {
                 unsigned long hva = (unsigned long)ram_ptr & TARGET_PAGE_MASK;
-                unsigned int npages = DIV_ROUND_UP(len, TARGET_PAGE_SIZE);
+                unsigned int npages = DIV_ROUND_UP(l, TARGET_PAGE_SIZE);
                 xen_update_hva(hva, npages);
-                break;
-            } else
-#endif
-            {
-                memmove(ram_ptr, buf, l);
-                invalidate_and_set_dirty(mr, addr1, l);
             }
+#endif
         }
 
         if (release_lock) {
@@ -2727,18 +2723,14 @@ MemTxResult flatview_read_continue(FlatView *fv, hwaddr addr,
         } else {
             /* RAM case */
             ram_ptr = qemu_ram_ptr_length(mr->ram_block, addr1, &l, false);
-
+            memcpy(buf, ram_ptr, l);
 #ifdef DYN_HVA_MAPPING
             if (xen_enabled() && mr->is_hostmem) {
                 unsigned long hva = (unsigned long)ram_ptr & TARGET_PAGE_MASK;
-                unsigned int npages = DIV_ROUND_UP(len, TARGET_PAGE_SIZE);
+                unsigned int npages = DIV_ROUND_UP(l, TARGET_PAGE_SIZE);
                 xen_update_hva(hva, npages);
-                break;
-            } else
-#endif
-            {
-                memcpy(buf, ram_ptr, l);
             }
+#endif
         }
 
         if (release_lock) {
