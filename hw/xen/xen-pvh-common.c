@@ -88,9 +88,12 @@ static inline void xenpvh_gpex_init(MachineState *ms,
     memory_region_add_subregion(sysmem, ecam_base, &s->pci.ecam_alias);
 
     mmio_reg = sysbus_mmio_get_region(SYS_BUS_DEVICE(dev), 1);
-    memory_region_init_alias(&s->pci.mmio_alias, OBJECT(dev), "pcie-mmio",
-                             mmio_reg, mmio_base, mmio_size);
-    memory_region_add_subregion(sysmem, mmio_base, &s->pci.mmio_alias);
+
+    if (mmio_size) {
+        memory_region_init_alias(&s->pci.mmio_alias, OBJECT(dev), "pcie-mmio",
+                                 mmio_reg, mmio_base, mmio_size);
+        memory_region_add_subregion(sysmem, mmio_base, &s->pci.mmio_alias);
+    }
 
     if (mmio_high_size) {
         memory_region_init_alias(&s->pci.mmio_high_alias, OBJECT(dev),
