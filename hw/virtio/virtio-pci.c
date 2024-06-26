@@ -2174,7 +2174,7 @@ static void virtio_pci_realize(PCIDevice *pci_dev, Error **errp)
         return;
     }
 
-    if (pcie_port && pci_is_express(pci_dev)) {
+    if (pci_is_express(pci_dev)) {
         int pos;
         uint16_t last_pcie_cap_offset = PCI_CONFIG_SPACE_SIZE;
 
