@@ -55,6 +55,8 @@ struct sdl2_console {
 
 void sdl2_window_create(struct sdl2_console *scon);
 void sdl2_window_destroy(struct sdl2_console *scon);
+void sdl2_window_hide(struct sdl2_console *scon);
+void sdl2_window_show(struct sdl2_console *scon);
 void sdl2_window_resize(struct sdl2_console *scon);
 void sdl2_poll_events(struct sdl2_console *scon);
 

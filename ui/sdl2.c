@@ -128,6 +128,21 @@ void sdl2_window_create(struct sdl2_console *scon)
     sdl_update_caption(scon);
 }
 
+void sdl2_window_hide(struct sdl2_console *scon)
+{
+    if (!scon->real_window) {
+        return;
+    }
+    SDL_HideWindow(scon->real_window);
+}
+
+void sdl2_window_show(struct sdl2_console *scon)
+{
+    if (!scon->real_window) {
+        return;
+    }
+    SDL_ShowWindow(scon->real_window);
+}
 void sdl2_window_destroy(struct sdl2_console *scon)
 {
     if (!scon->real_window) {

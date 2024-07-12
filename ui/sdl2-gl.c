@@ -90,12 +90,6 @@ void sdl2_gl_switch(DisplayChangeListener *dcl,
 
     scon->surface = new_surface;
 
-    if (is_placeholder(new_surface) && qemu_console_get_index(dcl->con)) {
-        qemu_gl_fini_shader(scon->gls);
-        scon->gls = NULL;
-        sdl2_window_destroy(scon);
-        return;
-    }
 
     if (!scon->real_window) {
         sdl2_window_create(scon);
@@ -107,6 +101,11 @@ void sdl2_gl_switch(DisplayChangeListener *dcl,
     }
 
     surface_gl_create_texture(scon->gls, scon->surface);
+    if (is_placeholder(new_surface) && (qemu_console_get_index(dcl->con))) {
+        sdl2_window_hide(scon);
+    } else {
+        sdl2_window_show(scon);
+    }
 }
 
 void sdl2_gl_refresh(DisplayChangeListener *dcl)
