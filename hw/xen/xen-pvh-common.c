@@ -124,7 +124,7 @@ void xen_pvh_common_init(MachineState *machine, XenPVHCommonState *s,
     }
 
     xen_pvh_init_ram(machine, s, sysmem);
-    xen_register_ioreq(&s->ioreq, machine->smp.cpus, &xen_memory_listener);
+    xen_register_ioreq(&s->ioreq, machine->smp.max_cpus, &xen_memory_listener);
 
     if (s->cfg.pci.ecam.size) {
         xenpvh_gpex_init(machine, s, sysmem,
