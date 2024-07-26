@@ -368,7 +368,7 @@ static inline int xen_get_default_ioreq_server_info(domid_t dom,
 #ifdef DYN_HVA_MAPPING
 static inline void xen_update_hva(unsigned long hva, size_t npages)
 {
-    privcmd_update_hva(xen_fmem, hva, npages);
+    privcmd_update_hva(xen_fmem, xen_domid, hva, npages);
 }
 #else
 static bool reuse_hva_hpfn_mapping = true;
@@ -495,10 +495,11 @@ out:
         else
             section->mr->is_hostmem = false;
     }
-#endif /* DYN_HVA_MAPPING */
 
     fprintf(stderr, "Map (%s) via ioreqserver: dom=%d addr=0x%lx-0x%lx size=0x%lx\n",
             section->mr->name, dom, start_addr, end_addr, size);
+#endif /* DYN_HVA_MAPPING */
+
     trace_xen_map_mmio_range(ioservid, start_addr, end_addr);
     xendevicemodel_map_io_range_to_ioreq_server(xen_dmod, dom, ioservid, 1,
                                                 start_addr, end_addr);
@@ -640,10 +641,11 @@ static inline void xen_unmap_memory_section(domid_t dom,
         }
         return;
     }
-#endif /* DYN_HVA_MAPPING */
 
     fprintf(stderr, "Unmap (%s) via ioreqserver: dom=%d addr=0x%lx-0x%lx size=0x%lx\n",
             section->mr->name, dom, start_addr, end_addr, size);
+#endif /* DYN_HVA_MAPPING */
+
     trace_xen_unmap_mmio_range(ioservid, start_addr, end_addr);
     xendevicemodel_unmap_io_range_from_ioreq_server(xen_dmod, dom, ioservid,
                                                     1, start_addr, end_addr);
