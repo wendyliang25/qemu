@@ -3690,3 +3690,22 @@ bool ram_block_discard_is_required(void)
     return qatomic_read(&ram_block_discard_required_cnt) ||
            qatomic_read(&ram_block_coordinated_discard_required_cnt);
 }
+
+/* Return a host pointer to ram allocated with guest pfns.
+ * only for Xen.
+ */
+void* qemu_map_pfns_ptr(unsigned long *pfns, size_t npfns)
+{
+    if (!xen_enabled())
+        return NULL;
+
+    return xen_map_pfns(pfns, npfns);
+}
+
+int qemu_unmap_pfns_ptr(void* addr, size_t npfns)
+{
+    if (!xen_enabled())
+        return -EPERM;
+
+    return xen_unmap_pfns(addr, npfns);
+}

@@ -25,6 +25,8 @@ void xen_invalidate_map_cache(void);
 uint8_t *xen_replace_cache_entry(hwaddr old_phys_addr,
                                  hwaddr new_phys_addr,
                                  hwaddr size);
+void *xen_map_pfns(unsigned long *pfns, size_t npfns);
+int xen_unmap_pfns(void* addr, size_t npfns);
 #else
 
 static inline void xen_map_cache_init(phys_offset_to_gaddr_t f,
@@ -56,6 +58,16 @@ static inline void xen_invalidate_map_cache(void)
 static inline uint8_t *xen_replace_cache_entry(hwaddr old_phys_addr,
                                                hwaddr new_phys_addr,
                                                hwaddr size)
+{
+    abort();
+}
+
+static inline void *xen_map_pfns(unsigned long *pfns, size_t npfns)
+{
+    abort();
+}
+
+static inline int xen_unmap_pfns(void* addr, size_t npfns)
 {
     abort();
 }

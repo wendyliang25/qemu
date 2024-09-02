@@ -614,3 +614,20 @@ uint8_t *xen_replace_cache_entry(hwaddr old_phys_addr,
     mapcache_unlock();
     return p;
 }
+
+
+void *xen_map_pfns(unsigned long *pfns, size_t npfns)
+{
+    if (!xen_fmem)
+        return NULL;
+
+    return xenforeignmemory_map(xen_fmem, xen_domid, PROT_READ | PROT_WRITE, npfns, pfns, NULL);
+}
+
+int xen_unmap_pfns(void* addr, size_t npfns)
+{
+    if (!xen_fmem)
+        return -EPERM;
+
+    return xenforeignmemory_unmap(xen_fmem, addr, npfns);
+}

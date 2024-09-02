@@ -167,4 +167,8 @@ extern int singlestep;
 
 void list_cpus(const char *optarg);
 
+void* qemu_map_pfns_ptr(unsigned long *pfns, size_t npfns);
+
+int qemu_unmap_pfns_ptr(void* addr, size_t npfns);
+
 #endif /* CPU_COMMON_H */
