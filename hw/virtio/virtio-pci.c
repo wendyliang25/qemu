@@ -2345,7 +2345,7 @@ static Property virtio_pci_properties[] = {
     DEFINE_PROP_BIT("x-pcie-pm-init", VirtIOPCIProxy, flags,
                     VIRTIO_PCI_FLAG_INIT_PM_BIT, true),
     DEFINE_PROP_BIT("x-pcie-pm-no-soft-reset", VirtIOPCIProxy, flags,
-                    VIRTIO_PCI_FLAG_PM_NO_SOFT_RESET_BIT, false),
+                    VIRTIO_PCI_FLAG_PM_NO_SOFT_RESET_BIT, true),
     DEFINE_PROP_BIT("x-pcie-flr-init", VirtIOPCIProxy, flags,
                     VIRTIO_PCI_FLAG_INIT_FLR_BIT, true),
     DEFINE_PROP_BIT("aer", VirtIOPCIProxy, flags,
