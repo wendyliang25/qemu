@@ -841,6 +841,7 @@ static DisplayChangeListenerOps dcl_gl_ops = {
     .dpy_gl_release_dmabuf   = NULL,
     .dpy_has_dmabuf          = NULL,
     .dpy_gl_set_hdcp          = sdl2_gl_set_hdcp,
+    .dpy_set_dpms            = sdl2_set_dpms,
 };
 
 static void sdl2_enable_dmabuf_scanout(void)

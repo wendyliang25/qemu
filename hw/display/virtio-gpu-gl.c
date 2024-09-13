@@ -104,6 +104,23 @@ static void virtio_gpu_gl_reset(VirtIODevice *vdev)
     }
 }
 
+static void
+virtio_gpu_gl_update_status(VirtIODevice *vdev, uint8_t val)
+{
+    VirtIOGPU *g = VIRTIO_GPU(vdev);
+    VirtIOGPUBase *b = VIRTIO_GPU_BASE(g);
+
+    for (int i = 0; i < b->conf.max_outputs; i++) {
+        if (!b->scanout[i].con)
+            continue;
+        if (val ==  VIRTIO_DEVICE_STATUS_D3) {
+            dpy_set_dpms(b->scanout[i].con, CON_DPMS_SUSPEND);
+        } else {
+            dpy_set_dpms(b->scanout[i].con, CON_DPMS_ON);
+        }
+    }
+}
+
 static void virtio_gpu_gl_device_realize(DeviceState *qdev, Error **errp)
 {
     VirtIOGPU *g = VIRTIO_GPU(qdev);
@@ -150,6 +167,7 @@ static void virtio_gpu_gl_class_init(ObjectClass *klass, void *data)
 
     vdc->realize = virtio_gpu_gl_device_realize;
     vdc->reset = virtio_gpu_gl_reset;
+    vdc->update_device_status   = virtio_gpu_gl_update_status;
     device_class_set_props(dc, virtio_gpu_gl_properties);
 }
 

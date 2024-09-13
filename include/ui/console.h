@@ -197,6 +197,13 @@ enum display_scanout {
     SCANOUT_DMABUF,
 };
 
+typedef enum {
+    CON_DPMS_ON,
+    CON_DPMS_STANDBY,
+    CON_DPMS_SUSPEND,
+    CON_DPMS_OFF
+}qdpms_enum;
+
 typedef struct DisplayScanout {
     enum display_scanout kind;
     union {
@@ -274,6 +281,8 @@ typedef struct DisplayChangeListenerOps {
     /* optional */
     void (*dpy_gl_set_hdcp)(DisplayChangeListener *dcl, uint32_t type, uint32_t mode);
 
+    /* optional */
+    void (*dpy_set_dpms)(DisplayChangeListener *dcl, qdpms_enum level);
 } DisplayChangeListenerOps;
 
 struct DisplayChangeListener {
@@ -370,6 +379,7 @@ void dpy_gl_release_dmabuf(QemuConsole *con,
 void dpy_gl_update(QemuConsole *con,
                    uint32_t x, uint32_t y, uint32_t w, uint32_t h);
 void dpy_gl_set_hdcp(QemuConsole *con, uint32_t type, uint32_t mode);
+void dpy_set_dpms(QemuConsole *con, qdpms_enum level);
 QEMUGLContext dpy_gl_ctx_create(QemuConsole *con,
                                 QEMUGLParams *params);
 void dpy_gl_ctx_destroy(QemuConsole *con, QEMUGLContext ctx);

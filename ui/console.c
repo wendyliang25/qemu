@@ -1982,6 +1982,21 @@ int dpy_gl_ctx_make_current(QemuConsole *con, QEMUGLContext ctx)
     return con->gl->ops->dpy_gl_ctx_make_current(con->gl, ctx);
 }
 
+void dpy_set_dpms(QemuConsole *con, qdpms_enum level)
+{
+    DisplayState *s = con->ds;
+    DisplayChangeListener *dcl;
+
+    QLIST_FOREACH(dcl, &s->listeners, next) {
+        if (con != (dcl->con ? dcl->con : active_console)) {
+            continue;
+        }
+        if (dcl->ops->dpy_set_dpms) {
+            dcl->ops->dpy_set_dpms(dcl, level);
+        }
+    }
+}
+
 void dpy_gl_scanout_disable(QemuConsole *con)
 {
     DisplayState *s = con->ds;

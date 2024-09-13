@@ -189,6 +189,17 @@ int sdl2_gl_make_context_current(DisplayGLCtx *dgc,
     return SDL_GL_MakeCurrent(scon->real_window, sdlctx);
 }
 
+void sdl2_set_dpms(DisplayChangeListener *dcl, uint32_t level)
+{
+    struct sdl2_console *scon = container_of(dcl, struct sdl2_console, dcl);
+
+    assert(scon->opengl);
+#ifdef HAVE_SDL_SETDPMS
+    if (scon->real_window)
+        SDL_SetDpms(scon->real_window, level);
+#endif
+}
+
 void sdl2_gl_scanout_disable(DisplayChangeListener *dcl)
 {
     struct sdl2_console *scon = container_of(dcl, struct sdl2_console, dcl);

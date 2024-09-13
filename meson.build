@@ -1001,6 +1001,9 @@ if not get_option('sdl').auto() or have_system
   if sdl.found()
     config_host_data.set('HAVE_SDL_SETHDCP',
                          cc.has_function('SDL_SetWindowProtectedMode', dependencies: sdl))
+    config_host_data.set('HAVE_SDL_SETDPMS',
+                         cc.has_function('SDL_SetDpms',
+                                         dependencies: sdl))
   endif
   sdl_image = not_found
 endif
