@@ -753,6 +753,7 @@ static void virtio_write_config(PCIDevice *pci_dev, uint32_t address,
 {
     VirtIOPCIProxy *proxy = VIRTIO_PCI(pci_dev);
     VirtIODevice *vdev = virtio_bus_get_device(&proxy->bus);
+    VirtioDeviceClass *k = VIRTIO_DEVICE_GET_CLASS(vdev);
     struct virtio_pci_cfg_cap *cfg;
 
     pci_default_write_config(pci_dev, address, val, len);
@@ -772,6 +773,15 @@ static void virtio_write_config(PCIDevice *pci_dev, uint32_t address,
             virtio_set_status(vdev, vdev->status & ~VIRTIO_CONFIG_S_DRIVER_OK);
         } else {
             virtio_set_disabled(vdev, false);
+        }
+    }
+
+    if (pci_is_express(pci_dev) && pci_dev->exp.pm_cap) {
+        uint32_t tmp_addr = pci_dev->exp.pm_cap + PCI_PM_CTRL;
+        if (tmp_addr == address) {
+            uint16_t pmcsr = pci_get_word(pci_dev->config + tmp_addr);
+            if (k->update_device_status)
+                k->update_device_status(vdev, pmcsr & PCI_PM_CTRL_STATE_MASK);
         }
     }
 

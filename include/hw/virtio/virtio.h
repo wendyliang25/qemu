@@ -35,6 +35,8 @@
                                 (0x1ULL << VIRTIO_F_NOTIFY_ON_EMPTY) | \
                                 (0x1ULL << VIRTIO_F_ANY_LAYOUT))
 
+#define VIRTIO_DEVICE_STATUS_D3 3
+
 struct VirtQueue;
 
 static inline hwaddr vring_align(hwaddr addr,
@@ -214,6 +216,10 @@ struct VirtioDeviceClass {
     bool (*primary_unplug_pending)(void *opaque);
     struct vhost_dev *(*get_vhost)(VirtIODevice *vdev);
     void (*toggle_device_iotlb)(VirtIODevice *vdev);
+    /* When the power control PCI_PM_CTRL register is written,
+     * update the current device’s state(D0~D3) accordingly.
+     */
+    void (*update_device_status)(VirtIODevice *vdev, uint8_t val);
 };
 
 void virtio_instance_init_common(Object *proxy_obj, void *data,
