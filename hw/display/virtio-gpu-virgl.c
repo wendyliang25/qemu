@@ -620,16 +620,22 @@ static void virgl_cmd_resource_create_blob(VirtIOGPU *g,
         if(cblob.blob_flags & VIRTIO_GPU_BLOB_FLAG_USE_USERPTR) {
             ret = virtio_gpu_create_mapping_pfns(g, cblob.nr_entries, sizeof(cblob),
                                         cmd, &vres->res.pfns_mapped, &vres->res.npfns, &cblob);
+            if (ret != 0) {
+                g_free(vres);
+                cmd->error = VIRTIO_GPU_RESP_ERR_UNSPEC;
+                return;
+            }
         } else {
             ret = virtio_gpu_create_mapping_iov(g, cblob.nr_entries, sizeof(cblob),
                                         cmd, &vres->res.addrs,
                                         &vres->res.iov, &vres->res.iov_cnt);
+            if (!ret) {
+                g_free(vres);
+                cmd->error = VIRTIO_GPU_RESP_ERR_UNSPEC;
+                return;
+            }
         }
-        if (ret != 0) {
-            g_free(vres);
-            cmd->error = VIRTIO_GPU_RESP_ERR_UNSPEC;
-            return;
-        }
+
     }
 
     QTAILQ_INSERT_HEAD(&g->reslist, &vres->res, next);
