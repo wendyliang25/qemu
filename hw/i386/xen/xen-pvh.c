@@ -85,7 +85,7 @@ static void xenpvh_init(MachineState *machine)
     xp->pvh.cfg.pci.mmio_high.base = xp->pcie_64bit_mmio_base;
     xp->pvh.cfg.pci.mmio_high.size = xp->pcie_64bit_mmio_size;
     /* GSI's 16 - 20 are used for legacy PCIe INTX IRQs.  */
-    xp->pvh.cfg.pci.intx_irq_base = 16;
+    xp->pvh.cfg.pci.intx_irq_base = 24;
 
     /* Create dummy cores. This will also create the APIC MSI window.  */
     for (i = 0; i < machine->smp.cpus; i++) {
