@@ -498,7 +498,7 @@ void teec_post_process_whole(TEEC_RegisteredMemoryReference *memref,
          * the shadow buffer into the real buffer now that we've
          * returned from secure world.
          */
-        if (shm->shadow_buffer && MEMREF_SIZE(param) <= memref->size) {
+        if (shm->shadow_buffer && MEMREF_SIZE(param) <= shm->size) {
             memcpy(shm->buffer, shm->shadow_buffer, MEMREF_SIZE(param));
         }
 
@@ -519,7 +519,8 @@ void teec_post_process_partial(uint32_t param_type,
          * the shadow buffer into the real buffer now that we've
          * returned from secure world.
          */
-        if (shm->shadow_buffer && MEMREF_SIZE(param) <= memref->size) {
+        if (shm->shadow_buffer && memref->offset <= shm->size &&
+            MEMREF_SIZE(param) <= (shm->size - memref->offset)) {
             memcpy((char *)shm->buffer + memref->offset,
                    (char *)shm->shadow_buffer + memref->offset,
                    MEMREF_SIZE(param));
