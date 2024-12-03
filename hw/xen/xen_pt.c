@@ -586,43 +586,6 @@ static void xen_pt_check_bar_overlap(PCIBus *bus, PCIDevice *d, void *opaque)
     }
 }
 
-static int xen_pt_region_memory_mapping_req(XenPCIPassthroughState *s,
-                                MemoryRegionSection *sec, bool adding)
-{
-    PCIDevice *d = &s->dev;
-    MemoryRegion *mr = sec->mr;
-    int bar = -1, ret;
-    uint16_t val;
-    bool map;
-
-    bar = xen_pt_bar_from_region(s, mr);
-    if (bar == -1 )
-            return -1;
-    if (d->io_regions[bar].type & PCI_BASE_ADDRESS_SPACE_IO)
-            return -1;
-
-    ret = xen_host_pci_get_word(&s->real_device, PCI_COMMAND, &val);
-    if (ret) {
-             XEN_PT_LOG(d, "Failed err :%i to read PCI_COMMAND in %s\n",
-                            errno, __func__);
-             return -1;
-    }
-
-    map = val & PCI_COMMAND_MEMORY;
-    if (adding) {
-            if (map)
-                return 1;
-    } else {
-
-            if (!map)
-                return 1;
-
-            xen_host_pci_set_word(&s->real_device, PCI_COMMAND, val & ~PCI_COMMAND_MEMORY);
-            return 1;
-    }
-    return ret;
-}
-
 static void xen_pt_region_update(XenPCIPassthroughState *s,
                                  MemoryRegionSection *sec, bool adding)
 {
@@ -677,17 +640,6 @@ static void xen_pt_region_update(XenPCIPassthroughState *s,
         pcibus_t machine_addr = s->bases[bar].access.maddr
             + sec->offset_within_region;
         pcibus_t size = int128_get64(sec->size);
-        int req;
-
-        req = xen_pt_region_memory_mapping_req(s, sec, adding);
-        if (req == 1) {
-            XEN_PT_LOG(d, "%s will skip the following bar:%d region \n"
-                      "addr: 0x%"FMT_PCIBUS" : 0x%"FMT_PCIBUS"\n",
-                      adding ? "create new" : "remove old", bar,
-                      guest_addr, machine_addr);
-            return;
-        }
-
         rc = xc_domain_memory_mapping(xen_xc, xen_domid,
                                       XEN_PFN(guest_addr + XC_PAGE_SIZE - 1),
                                       XEN_PFN(machine_addr + XC_PAGE_SIZE - 1),
