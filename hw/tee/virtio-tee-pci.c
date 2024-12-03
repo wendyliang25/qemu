@@ -33,6 +33,11 @@
 #include "hw/virtio/virtio-pci.h"
 #include "hw/virtio/virtio-tee.h"
 
+static Property virtio_tee_pci_properties[] = {
+    DEFINE_PROP_UINT32("vectors", VirtIOPCIProxy, nvectors, 2),
+    DEFINE_PROP_END_OF_LIST(),
+};
+
 static void virtio_tee_pci_realize(VirtIOPCIProxy *vpci_dev, Error **errp)
 {
     VirtIOTEEPCI *vtee = VIRTIO_TEE_PCI(vpci_dev);
@@ -51,6 +56,7 @@ static void virtio_tee_pci_class_init(ObjectClass *klass, void *data)
     VirtioPCIClass *k = VIRTIO_PCI_CLASS(klass);
     PCIDeviceClass *pcidev_k = PCI_DEVICE_CLASS(klass);
 
+    device_class_set_props(dc, virtio_tee_pci_properties);
     set_bit(DEVICE_CATEGORY_MISC, dc->categories);
     dc->hotpluggable = false;
     k->realize = virtio_tee_pci_realize;
