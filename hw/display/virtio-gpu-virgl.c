@@ -660,6 +660,12 @@ static void virgl_cmd_resource_create_blob(VirtIOGPU *g,
     vres->res.protected = virgl_renderer_resource_is_protected(cblob.resource_id);
 }
 
+static void virgl_free_mr(void *obj)
+{
+    MemoryRegion *mr = MEMORY_REGION(obj);
+    g_free(mr);
+}
+
 static void virgl_cmd_resource_map_blob(VirtIOGPU *g,
                                         struct virtio_gpu_ctrl_command *cmd)
 {
@@ -718,6 +724,7 @@ static void virgl_cmd_resource_map_blob(VirtIOGPU *g,
     resp.hdr.type = VIRTIO_GPU_RESP_OK_MAP_INFO;
     virgl_renderer_resource_get_map_info(mblob.resource_id, &resp.map_info);
     virtio_gpu_ctrl_response(g, cmd, &resp.hdr, sizeof(resp));
+    OBJECT(vres->region)->free = virgl_free_mr;
 }
 
 static void virgl_cmd_resource_unmap_blob(VirtIOGPU *g,
