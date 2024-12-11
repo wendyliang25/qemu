@@ -9,7 +9,6 @@
 #include "qemu/osdep.h"
 #include "qapi/error.h"
 #include "qemu/cutils.h"
-#include "hw/xen/xen_native.h"
 #include "xen-host-pci-device.h"
 
 #define XEN_HOST_PCI_MAX_EXT_CAP \
@@ -369,7 +368,7 @@ void xen_host_pci_device_get(XenHostPCIDevice *d, uint16_t domain,
     if (*errp) {
         goto error;
     }
-    d->irq = xc_physdev_gsi_from_irq(xen_xc, v);
+    d->irq = v;
 
     xen_host_pci_get_hex_value(d, "class", &v, errp);
     if (*errp) {
