@@ -259,6 +259,7 @@ struct virtio_gpu_resource_detach_backing {
 
 /* VIRTIO_GPU_RESP_OK_DISPLAY_INFO */
 #define VIRTIO_GPU_MAX_SCANOUTS 16
+#define VIRTIO_GPU_MAX_OVERLAYS_PER_SCANOUT 8
 struct virtio_gpu_resp_display_info {
 	struct virtio_gpu_ctrl_hdr hdr;
 	struct virtio_gpu_display_one {
@@ -390,6 +391,7 @@ struct virtio_gpu_config {
 	uint32_t events_clear;
 	uint32_t num_scanouts;
 	uint32_t num_capsets;
+	__le32 num_overlays[16]; /* equal to VIRTIO_GPU_MAX_SCANOUTS */
 };
 
 /* simple formats for fbcon/X use */
