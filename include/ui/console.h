@@ -189,6 +189,17 @@ typedef struct QemuDmaBuf {
     bool      allow_fences;
     bool      draw_submitted;
     bool      protected;
+
+    /* The following props are extended for overlay buffer */
+    uint32_t  alpha;
+    /*
+     * Z-position (zpos) is used to calculate occlusion relationships between
+     * the main window(scanout buffer) and other overlay buffers
+     */
+    uint32_t  zpos;
+    /* The position inside the scanout buffer */
+    uint32_t  x_coord;
+    uint32_t  y_coord;
 } QemuDmaBuf;
 
 enum display_scanout {
@@ -266,6 +277,9 @@ typedef struct DisplayChangeListenerOps {
     void (*dpy_gl_scanout_dmabuf)(DisplayChangeListener *dcl,
                                   QemuDmaBuf *dmabuf);
     /* optional */
+    void (*dpy_gl_overlay_dmabuf)(DisplayChangeListener *dcl,
+                                  QemuDmaBuf *dmabuf, uint32_t id);
+    /* optional */
     void (*dpy_gl_cursor_dmabuf)(DisplayChangeListener *dcl,
                                  QemuDmaBuf *dmabuf, bool have_hot,
                                  uint32_t hot_x, uint32_t hot_y);
@@ -279,6 +293,9 @@ typedef struct DisplayChangeListenerOps {
     void (*dpy_gl_update)(DisplayChangeListener *dcl,
                           uint32_t x, uint32_t y, uint32_t w, uint32_t h);
 
+    /* optional */
+    void (*dpy_gl_update_overlay)(DisplayChangeListener *dcl,uint32_t id,
+                                  uint32_t x, uint32_t y, uint32_t w, uint32_t h);
     /* optional */
     void (*dpy_gl_set_hdcp)(DisplayChangeListener *dcl, uint32_t type, uint32_t mode);
 
@@ -372,6 +389,7 @@ void dpy_gl_scanout_texture(QemuConsole *con,
                             uint32_t x, uint32_t y, uint32_t w, uint32_t h);
 void dpy_gl_scanout_dmabuf(QemuConsole *con,
                            QemuDmaBuf *dmabuf);
+void dpy_gl_overlay_dmabuf(QemuConsole *con, QemuDmaBuf *dmabuf, uint32_t id);
 void dpy_gl_cursor_dmabuf(QemuConsole *con, QemuDmaBuf *dmabuf,
                           bool have_hot, uint32_t hot_x, uint32_t hot_y);
 void dpy_gl_cursor_position(QemuConsole *con,
@@ -380,6 +398,8 @@ void dpy_gl_release_dmabuf(QemuConsole *con,
                            QemuDmaBuf *dmabuf);
 void dpy_gl_update(QemuConsole *con,
                    uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+void dpy_gl_update_overlay(QemuConsole *con, uint32_t id,
+                           uint32_t x, uint32_t y, uint32_t w, uint32_t h);
 void dpy_gl_set_hdcp(QemuConsole *con, uint32_t type, uint32_t mode);
 void dpy_set_dpms(QemuConsole *con, qdpms_enum level);
 QEMUGLContext dpy_gl_ctx_create(QemuConsole *con,

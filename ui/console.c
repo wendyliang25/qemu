@@ -2076,6 +2076,20 @@ void dpy_gl_scanout_texture(QemuConsole *con,
     }
 }
 
+void dpy_gl_overlay_dmabuf(QemuConsole *con, QemuDmaBuf *dmabuf, uint32_t id)
+{
+    DisplayState *s = con->ds;
+    DisplayChangeListener *dcl;
+
+    QLIST_FOREACH(dcl, &s->listeners, next) {
+        if (con != (dcl->con ? dcl->con : active_console))
+            continue;
+
+        if (dcl->ops->dpy_gl_overlay_dmabuf)
+            dcl->ops->dpy_gl_overlay_dmabuf(dcl, dmabuf, id);
+    }
+}
+
 void dpy_gl_scanout_dmabuf(QemuConsole *con,
                            QemuDmaBuf *dmabuf)
 {
@@ -2158,6 +2172,26 @@ void dpy_gl_update(QemuConsole *con,
         }
         if (dcl->ops->dpy_gl_update) {
             dcl->ops->dpy_gl_update(dcl, x, y, w, h);
+        }
+    }
+    graphic_hw_gl_block(con, false);
+}
+
+void dpy_gl_update_overlay(QemuConsole *con, uint32_t id,
+                           uint32_t x, uint32_t y, uint32_t w, uint32_t h)
+{
+    DisplayState *s = con->ds;
+    DisplayChangeListener *dcl;
+
+    assert(con->gl);
+
+    graphic_hw_gl_block(con, true);
+    QLIST_FOREACH(dcl, &s->listeners, next) {
+        if (con != (dcl->con ? dcl->con : active_console)) {
+            continue;
+        }
+        if (dcl->ops->dpy_gl_update_overlay) {
+            dcl->ops->dpy_gl_update_overlay(dcl, id, x, y, w, h);
         }
     }
     graphic_hw_gl_block(con, false);
