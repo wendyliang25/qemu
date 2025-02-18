@@ -19,6 +19,7 @@
 #include "qemu/error-report.h"
 #include "hw/display/edid.h"
 #include "trace.h"
+#include "qemu/cutils.h"
 
 void
 virtio_gpu_base_reset(VirtIOGPUBase *g)
@@ -180,6 +181,22 @@ virtio_gpu_base_device_realize(DeviceState *qdev,
     if (g->conf.max_outputs > VIRTIO_GPU_MAX_SCANOUTS) {
         error_setg(errp, "invalid max_outputs > %d", VIRTIO_GPU_MAX_SCANOUTS);
         return false;
+    }
+
+    if (g->conf.max_overlays_str) {
+        char *str = g->conf.max_overlays_str;
+        char *token = strtok(str, ",");
+
+        for (int i = 0; i < g->conf.max_outputs && token != NULL; i++) {
+        unsigned long long val;
+
+        if (parse_uint_full(token, &val, 10) ||
+            val > VIRTIO_GPU_MAX_OVERLAYS_PER_SCANOUT)
+            break;
+
+            g->virtio_config.num_overlays[i] = cpu_to_le32(val);
+            token = strtok(NULL, ",");
+        }
     }
 
     if (virtio_gpu_virgl_enabled(g->conf)) {
