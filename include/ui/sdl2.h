@@ -26,6 +26,22 @@
 # include "ui/egl-helpers.h"
 #endif
 
+#define SDL2_GL_MAX_OVERLAY_NUM    8
+typedef struct egl_overlay_fb {
+    bool valid;
+    egl_fb fb;
+    uint32_t width;
+    uint32_t height;
+    uint32_t id;
+    uint32_t alpha;
+    uint32_t zpos;
+
+    /* position on desktop */
+    uint32_t x_coord;
+    uint32_t y_coord;
+
+} egl_overlay_fb;
+
 struct sdl2_console {
     DisplayGLCtx dgc;
     DisplayChangeListener dcl;
@@ -48,6 +64,7 @@ struct sdl2_console {
     QemuGLShader *gls;
     egl_fb guest_fb;
     egl_fb win_fb;
+    egl_overlay_fb guest_overlay_fbs[SDL2_GL_MAX_OVERLAY_NUM];
     bool y0_top;
     bool scanout_mode;
 #endif
@@ -95,8 +112,12 @@ void sdl2_gl_scanout_texture(DisplayChangeListener *dcl,
                              uint32_t w, uint32_t h);
 void sdl2_gl_scanout_flush(DisplayChangeListener *dcl,
                            uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+void sdl2_gl_overlay_flush(DisplayChangeListener *dcl, uint32_t id,
+                           uint32_t x, uint32_t y, uint32_t w, uint32_t h);
 void sdl2_gl_scanout_dmabuf(DisplayChangeListener *dcl,
                             QemuDmaBuf *dmabuf);
+void sdl2_gl_overlay_dmabuf(DisplayChangeListener *dcl, QemuDmaBuf *dmabuf,
+                            uint32_t id);
 void sdl2_gl_release_dmabuf(DisplayChangeListener *dcl,
                             QemuDmaBuf *dmabuf);
 bool sdl2_gl_has_dmabuf(DisplayChangeListener *dcl);
