@@ -88,6 +88,7 @@ enum virtio_gpu_ctrl_type {
 	VIRTIO_GPU_CMD_RESOURCE_ASSIGN_UUID,
 	VIRTIO_GPU_CMD_RESOURCE_CREATE_BLOB,
 	VIRTIO_GPU_CMD_SET_SCANOUT_BLOB,
+	VIRTIO_GPU_CMD_SET_OVERLAY_BLOB,
 
 	/* 3d commands */
 	VIRTIO_GPU_CMD_CTX_CREATE = 0x0200,
@@ -121,6 +122,7 @@ enum virtio_gpu_ctrl_type {
 	VIRTIO_GPU_RESP_ERR_INVALID_RESOURCE_ID,
 	VIRTIO_GPU_RESP_ERR_INVALID_CONTEXT_ID,
 	VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER,
+	VIRTIO_GPU_RESP_ERR_INVALID_OVERLAY_ID,
 
 	/* AMD commands */
 	VIRTIO_GPU_CMD_STATUS_HDCP= 0x1301,
@@ -456,6 +458,24 @@ struct virtio_gpu_set_scanout_blob {
 	uint32_t padding;
 	uint32_t strides[4];
 	uint32_t offsets[4];
+};
+
+/* VIRTIO_GPU_CMD_SET_OVERLAY_BLOB */
+struct virtio_gpu_set_overlay_blob {
+	struct virtio_gpu_ctrl_hdr hdr;
+	struct virtio_gpu_rect r;
+	__le32 scanout_id;
+	__le32 overlay_id;
+	__le32 resource_id;
+	__le32 width;
+	__le32 height;
+	__le32 format;
+	__le32 alpha;
+	__le32 zpos;
+	__le32 x_coord;
+	__le32 y_coord;
+	__le32 strides[4];
+	__le32 offsets[4];
 };
 
 /* VIRTIO_GPU_CMD_RESOURCE_MAP_BLOB */
