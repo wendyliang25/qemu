@@ -38,6 +38,12 @@ OBJECT_DECLARE_SIMPLE_TYPE(VirtIOGPUGL, VIRTIO_GPU_GL)
 #define TYPE_VHOST_USER_GPU "vhost-user-gpu"
 OBJECT_DECLARE_SIMPLE_TYPE(VhostUserGPU, VHOST_USER_GPU)
 
+enum virgl_gpu_resource_type {
+    VIRGL_GPU_RESOURCE_TYPE_NONE = 0,
+    VIRGL_GPU_RESOURCE_TYPE_SCANOUT,
+    VIRGL_GPU_RESOURCE_TYPE_OVERLAY,
+    VIRGL_GPU_RESOURCE_TYPE_NUM,
+};
 struct virtio_gpu_simple_resource {
     uint32_t resource_id;
     uint32_t width;
@@ -61,6 +67,17 @@ struct virtio_gpu_simple_resource {
     bool protected;
 
     QTAILQ_ENTRY(virtio_gpu_simple_resource) next;
+
+    /* The following props are extended for overlay buffer */
+    uint32_t  alpha;
+    /*
+     * Z-position (zpos) is used to calculate occlusion relationships between
+     * the main window(scanout buffer) and other overlay buffers
+     */
+    uint32_t  zpos;
+    /* The position inside the scanout buffer */
+    uint32_t  x_coord;
+    uint32_t  y_coord;
 };
 
 struct virtio_gpu_framebuffer {
@@ -178,6 +195,9 @@ typedef struct VGPUDMABuf {
     QemuDmaBuf buf;
     uint32_t scanout_id;
     QTAILQ_ENTRY(VGPUDMABuf) next;
+
+    enum virgl_gpu_resource_type type;
+    uint32_t overlay_id;
 } VGPUDMABuf;
 
 struct VirtIOGPU {

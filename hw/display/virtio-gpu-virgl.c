@@ -36,6 +36,10 @@ struct virgl_gpu_resource {
     /* only blob resource needs this region to be mapped as guest mmio */
     MemoryRegion *region;
 #endif
+
+    enum virgl_gpu_resource_type type;
+    uint32_t scanout_id;
+    uint32_t overlay_id;
 };
 
 static void virgl_resource_destroy(struct virgl_gpu_resource *vres)
@@ -824,6 +828,14 @@ static void virgl_cmd_set_scanout_blob(VirtIOGPU *g,
         cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_RESOURCE_ID;
         return;
     }
+
+    /*
+     * The resource type is unknown when it is being created. Take this chance
+     * to set the type
+     */
+    vres->type = VIRGL_GPU_RESOURCE_TYPE_SCANOUT;
+    vres->scanout_id = ss.scanout_id;
+
     if (virgl_renderer_resource_get_info(ss.resource_id, &info)) {
         qemu_log_mask(LOG_GUEST_ERROR,
                       "%s: illegal virgl resource specified %d\n",
