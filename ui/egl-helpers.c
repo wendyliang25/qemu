@@ -132,6 +132,50 @@ void egl_fb_setup_new_tex(egl_fb *fb, int width, int height)
     egl_fb_setup_for_tex(fb, width, height, texture, true);
 }
 
+
+void egl_fb_blit_overlay(egl_fb *dst, egl_fb *src, bool flip, uint32_t x_coord,
+                         uint32_t y_coord)
+
+{
+    GLuint x1 = 0;
+    GLuint y1 = 0;
+    GLuint x2, y2;
+    GLuint w = src->width;
+    GLuint h = src->height;
+    GLuint dst_x1, dst_x2, dst_y1, dst_y2;
+
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, src->framebuffer);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, dst->framebuffer);
+    glViewport(0, 0, dst->width, dst->height);
+
+    if (src->dmabuf) {
+        x1 = src->dmabuf->x;
+        y1 = src->dmabuf->y;
+        w = src->dmabuf->scanout_width;
+        h = src->dmabuf->scanout_height;
+    }
+
+    /* The size must be valid in src */
+    w = (x1 + w) > src->width ? src->width - x1 : w;
+    h = (y1 + h) > src->height ? src->height - y1 : h;
+
+    /* The size must be valid in dst */
+    w = (x_coord + w) > dst->width ? (dst->width - x_coord) : w;
+    h = (y_coord + h) > dst->height ? (dst->height - y_coord) : h;
+
+    x2 = x1 + w;
+    y2 = y1 + h;
+
+    dst_x1 = x_coord;
+    dst_y1 = flip? (dst->height - y_coord) : y_coord;
+    dst_x2 = x_coord + w;
+    dst_y2 = flip? (dst->height - (y_coord + h)) : (y_coord + h);
+
+    glBlitFramebuffer(x1, y1, x2, y2,
+                      dst_x1, dst_y1, dst_x2, dst_y2,
+                      GL_COLOR_BUFFER_BIT, GL_LINEAR);
+}
+
 void egl_fb_blit(egl_fb *dst, egl_fb *src, bool flip)
 {
     GLuint x1 = 0;

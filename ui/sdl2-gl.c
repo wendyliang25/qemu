@@ -383,7 +383,8 @@ void sdl2_gl_overlay_flush(DisplayChangeListener *dcl, uint32_t id,
 
     SDL_GetWindowSize(scon->real_window, &ww, &wh);
     egl_fb_setup_default(&scon->win_fb, ww, wh);
-    egl_fb_blit(&scon->win_fb, &ov->fb, !scon->y0_top);
+    egl_fb_blit_overlay(&scon->win_fb, &ov->fb, !scon->y0_top, ov->x_coord,
+                        ov->y_coord);
 
     SDL_GL_SwapWindow(scon->real_window);
 }
