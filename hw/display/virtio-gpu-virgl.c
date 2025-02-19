@@ -251,15 +251,41 @@ static void virtio_gpu_rect_update(VirtIOGPU *g, int idx, int x, int y,
     dpy_gl_update(g->parent_obj.scanout[idx].con, x, y, width, height);
 }
 
+static void
+virgl_cmd_resource_flush_overlay(VirtIOGPU *g, struct virgl_gpu_resource *vres,
+                                 struct virtio_gpu_resource_flush *rf)
+{
+    QemuConsole *con = g->parent_obj.scanout[vres->scanout_id].con;
+
+    if (!con)
+        return;
+
+    dpy_gl_update_overlay(con, vres->overlay_id, rf->r.x, rf->r.y, rf->r.width,
+                          rf->r.height);
+}
+
 static void virgl_cmd_resource_flush(VirtIOGPU *g,
                                      struct virtio_gpu_ctrl_command *cmd)
 {
     struct virtio_gpu_resource_flush rf;
+    struct virgl_gpu_resource *vres;
     int i;
 
     VIRTIO_GPU_FILL_CMD(rf);
     trace_virtio_gpu_cmd_res_flush(rf.resource_id,
                                    rf.r.width, rf.r.height, rf.r.x, rf.r.y);
+
+    vres = virgl_gpu_find_resource(g, rf.resource_id);
+    if (!vres) {
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: illegal resource specified %d\n",
+                      __func__, rf.resource_id);
+        cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_RESOURCE_ID;
+        return;
+    }
+
+    if (vres->type == VIRGL_GPU_RESOURCE_TYPE_OVERLAY)
+        return virgl_cmd_resource_flush_overlay(g, vres, &rf);
 
     for (i = 0; i < g->parent_obj.conf.max_outputs; i++) {
         if (g->parent_obj.scanout[i].resource_id != rf.resource_id) {
