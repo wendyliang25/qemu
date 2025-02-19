@@ -26,6 +26,24 @@
 #include "qemu/memfd.h"
 #include "standard-headers/linux/udmabuf.h"
 
+static int virtio_gpu_find_overlay_by_id(VirtIOGPU *g, uint32_t scanout_id,
+                                         uint32_t overlay_id)
+{
+    VGPUDMABuf *tmp;
+    int i;
+
+    for (i = 0; i < VIRTIO_GPU_MAX_OVERLAYS_PER_SCANOUT; i++) {
+        tmp = g->dmabuf.overlay[scanout_id][i];
+        if (!tmp)
+            return i;
+
+        if (tmp->overlay_id == overlay_id)
+            return i;
+    }
+
+    return -EINVAL;
+}
+
 static void virtio_gpu_create_udmabuf(struct virtio_gpu_simple_resource *res)
 {
     struct udmabuf_create_list *list;
@@ -168,8 +186,8 @@ static void virtio_gpu_free_dmabuf(VirtIOGPU *g, VGPUDMABuf *dmabuf)
 }
 
 static VGPUDMABuf
-*virtio_gpu_create_dmabuf(VirtIOGPU *g,
-                          uint32_t scanout_id,
+*virtio_gpu_create_dmabuf(VirtIOGPU *g, enum virgl_gpu_resource_type type,
+                          uint32_t scanout_id, uint32_t overlay_id,
                           struct virtio_gpu_simple_resource *res,
                           struct virtio_gpu_framebuffer *fb,
                           struct virtio_gpu_rect *r)
@@ -195,6 +213,15 @@ static VGPUDMABuf
     dmabuf->scanout_id = scanout_id;
     dmabuf->buf.protected = res->protected;
 
+    /* Extra props for overlay buffer */
+    if (type == VIRGL_GPU_RESOURCE_TYPE_OVERLAY) {
+        dmabuf->overlay_id = overlay_id;
+        dmabuf->buf.zpos = res->zpos;
+        dmabuf->buf.alpha = res->alpha;
+        dmabuf->buf.x_coord = res->x_coord;
+        dmabuf->buf.y_coord = res->y_coord;
+    }
+
     QTAILQ_INSERT_HEAD(&g->dmabuf.bufs, dmabuf, next);
 
     return dmabuf;
@@ -209,7 +236,8 @@ int virtio_gpu_update_dmabuf(VirtIOGPU *g,
     struct virtio_gpu_scanout *scanout = &g->parent_obj.scanout[scanout_id];
     VGPUDMABuf *new_primary, *old_primary = NULL;
 
-    new_primary = virtio_gpu_create_dmabuf(g, scanout_id, res, fb, r);
+    new_primary = virtio_gpu_create_dmabuf(g, VIRGL_GPU_RESOURCE_TYPE_SCANOUT,
+                                           scanout_id, UINT32_MAX, res, fb, r);
     if (!new_primary) {
         return -EINVAL;
     }
@@ -227,6 +255,40 @@ int virtio_gpu_update_dmabuf(VirtIOGPU *g,
     if (old_primary) {
         virtio_gpu_free_dmabuf(g, old_primary);
     }
+
+    return 0;
+}
+int virtio_gpu_update_dmabuf_overlay(VirtIOGPU *g,
+                                     uint32_t scanout_id, uint32_t overlay_id,
+                                     struct virtio_gpu_simple_resource *res,
+                                     struct virtio_gpu_framebuffer *fb,
+                                     struct virtio_gpu_rect *r)
+{
+    struct virtio_gpu_scanout *scanout = &g->parent_obj.scanout[scanout_id];
+    VGPUDMABuf *new_overlay, *old_overlay = NULL;
+    int ov_slot;
+
+    new_overlay = virtio_gpu_create_dmabuf(g, VIRGL_GPU_RESOURCE_TYPE_OVERLAY,
+                                           scanout_id, overlay_id, res, fb, r);
+    if (!new_overlay)
+        return -EINVAL;
+
+    ov_slot = virtio_gpu_find_overlay_by_id(g, scanout_id, overlay_id);
+    if (ov_slot < 0) {
+        virtio_gpu_free_dmabuf(g, new_overlay);
+        return -EINVAL;
+    }
+
+    if (g->dmabuf.overlay[scanout_id][ov_slot])
+        old_overlay = g->dmabuf.overlay[scanout_id][ov_slot];
+
+    g->dmabuf.overlay[scanout_id][ov_slot] = new_overlay;
+
+    /* Present this overlay by console or other method, like weston surface */
+    dpy_gl_overlay_dmabuf(scanout->con, &new_overlay->buf, overlay_id);
+
+    if (old_overlay)
+        virtio_gpu_free_dmabuf(g, old_overlay);
 
     return 0;
 }

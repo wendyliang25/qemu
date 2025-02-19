@@ -235,6 +235,7 @@ struct VirtIOGPU {
     struct {
         QTAILQ_HEAD(, VGPUDMABuf) bufs;
         VGPUDMABuf *primary[VIRTIO_GPU_MAX_SCANOUTS];
+        VGPUDMABuf *overlay[VIRTIO_GPU_MAX_SCANOUTS][VIRTIO_GPU_MAX_OVERLAYS_PER_SCANOUT];
     } dmabuf;
 
     GHashTable *resource_uuids;
@@ -350,6 +351,11 @@ int virtio_gpu_update_dmabuf(VirtIOGPU *g,
                              struct virtio_gpu_framebuffer *fb,
                              struct virtio_gpu_rect *r);
 
+int virtio_gpu_update_dmabuf_overlay(VirtIOGPU *g,
+                                     uint32_t scanout_id, uint32_t overlay_id,
+                                     struct virtio_gpu_simple_resource *res,
+                                     struct virtio_gpu_framebuffer *fb,
+                                     struct virtio_gpu_rect *r);
 void virtio_gpu_update_scanout(VirtIOGPU *g,
                                uint32_t scanout_id,
                                struct virtio_gpu_simple_resource *res,
