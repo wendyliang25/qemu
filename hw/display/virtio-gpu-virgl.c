@@ -904,6 +904,129 @@ static void virgl_cmd_set_scanout_blob(VirtIOGPU *g,
     }
 }
 
+/* The main logic is borrowed from virgl_cmd_set_scanout_blob() */
+static void virgl_cmd_set_overlay_blob(VirtIOGPU *g,
+                                       struct virtio_gpu_ctrl_command *cmd)
+{
+    struct virgl_gpu_resource *vres;
+    struct virtio_gpu_framebuffer fb = { 0 };
+    struct virtio_gpu_set_overlay_blob so;
+    struct virgl_renderer_resource_info info;
+    uint64_t fbend;
+    int transient_fd = 0;
+
+    VIRTIO_GPU_FILL_CMD(so);
+    virtio_gpu_overlay_blob_bswap(&so);
+    trace_virtio_gpu_cmd_set_overlay_blob(so.overlay_id,so.resource_id,
+                                          so.r.width, so.r.height, so.r.x,
+                                          so.r.y, so.alpha,
+                                          so.zpos, so.x_coord, so.y_coord);
+
+    if (so.scanout_id >= g->parent_obj.conf.max_outputs) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: illegal scanout id specified %d",
+                      __func__, so.scanout_id);
+        cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_SCANOUT_ID;
+        return;
+    }
+
+    if (so.resource_id == 0)
+        return;
+
+    if (so.width < 16 ||
+        so.height < 16 ||
+        so.r.x + so.r.width > so.width ||
+        so.r.y + so.r.height > so.height) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: illegal overlay %d bounds for"
+                      " resource %d, rect (%d,%d)+%d,%d, fb %d %d\n",
+                      __func__, so.overlay_id, so.resource_id,
+                      so.r.x, so.r.y, so.r.width, so.r.height,
+                      so.width, so.height);
+        cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER;
+        return;
+    }
+
+    vres = virgl_gpu_find_resource(g, so.resource_id);
+    if (!vres) {
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: illegal resource specified %d\n",
+                      __func__, so.resource_id);
+        cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_RESOURCE_ID;
+        return;
+    }
+
+    /*
+     * All the overlay props are unknown when it is being created. Take this
+     * chance to set them
+     */
+    vres->type = VIRGL_GPU_RESOURCE_TYPE_OVERLAY;
+    vres->scanout_id = so.scanout_id;
+    vres->overlay_id = so.overlay_id;
+    vres->res.zpos = so.zpos;
+    vres->res.alpha = so.alpha;
+    vres->res.x_coord = so.x_coord;
+    vres->res.y_coord = so.y_coord;
+
+    if (virgl_renderer_resource_get_info(so.resource_id, &info)) {
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: illegal virgl resource specified %d\n",
+                      __func__, so.resource_id);
+        cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_RESOURCE_ID;
+        return;
+    }
+
+    if (!vres->res.dmabuf_fd) {
+        if (info.fd >= 0) {
+            vres->res.dmabuf_fd = info.fd;
+        } else {
+            uint32_t fd_type;
+            if (virgl_renderer_resource_export_blob(so.resource_id, &fd_type, &transient_fd) == 0 &&
+                fd_type == VIRGL_RENDERER_BLOB_FD_TYPE_DMABUF) {
+                vres->res.dmabuf_fd = transient_fd;
+            } else {
+                close(transient_fd);
+                transient_fd = 0;
+            }
+        }
+    }
+
+    fb.format = virtio_gpu_get_pixman_format(so.format);
+    if (!fb.format) {
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: host couldn't handle guest format %d\n",
+                      __func__, so.format);
+        cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER;
+        return;
+    }
+
+    fb.bytes_pp = DIV_ROUND_UP(PIXMAN_FORMAT_BPP(fb.format), 8);
+    fb.width = so.width;
+    fb.height = so.height;
+    fb.stride = so.strides[0];
+    fb.offset = so.offsets[0] + so.r.x * fb.bytes_pp + so.r.y * fb.stride;
+
+    fbend = fb.offset;
+    fbend += fb.stride * (so.r.height - 1);
+    fbend += fb.bytes_pp * so.r.width;
+    if (fbend > vres->res.blob_size) {
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: fb end out of range\n",
+                      __func__);
+        cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER;
+        return;
+    }
+
+    if (virtio_gpu_update_dmabuf_overlay(g, so.scanout_id, so.overlay_id,
+                                         &vres->res, &fb, &so.r)) {
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: failed to update dmabuf\n", __func__);
+        cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER;
+        if (vres->res.dmabuf_fd == transient_fd) {
+            vres->res.dmabuf_fd = 0;
+            close(transient_fd);
+        }
+    }
+}
+
 #endif /* HAVE_VIRGL_RESOURCE_BLOB */
 
 void virtio_gpu_virgl_process_cmd(VirtIOGPU *g,
@@ -987,6 +1110,9 @@ void virtio_gpu_virgl_process_cmd(VirtIOGPU *g,
         break;
     case VIRTIO_GPU_CMD_SET_SCANOUT_BLOB:
         virgl_cmd_set_scanout_blob(g, cmd);
+        break;
+    case VIRTIO_GPU_CMD_SET_OVERLAY_BLOB:
+        virgl_cmd_set_overlay_blob(g, cmd);
         break;
 #endif /* HAVE_VIRGL_RESOURCE_BLOB */
     case VIRTIO_GPU_CMD_STATUS_HDCP:

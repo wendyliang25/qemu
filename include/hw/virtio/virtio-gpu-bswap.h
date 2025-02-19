@@ -89,4 +89,11 @@ virtio_gpu_scanout_blob_bswap(struct virtio_gpu_set_scanout_blob *ssb)
     le32_to_cpus(&ssb->offsets[3]);
 }
 
+static inline void
+virtio_gpu_overlay_blob_bswap(struct virtio_gpu_set_overlay_blob *sob)
+{
+    virtio_gpu_bswap_32(sob, sizeof(*sob) - sizeof(sob->offsets[3]));
+    le32_to_cpus(&sob->offsets[3]);
+}
+
 #endif
