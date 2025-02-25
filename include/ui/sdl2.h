@@ -42,6 +42,17 @@ typedef struct egl_overlay_fb {
 
 } egl_overlay_fb;
 
+enum sdl2_overlay_present_type {
+    SDL2_OVERLAY_PRESENT_TYPE_NONE = 0,
+    /* Blit to Main window */
+    SDL2_OVERLAY_PRESENT_TYPE_BLIT,
+    /* Present it by sub window */
+    SDL2_OVERLAY_PRESENT_TYPE_SUBWIN,
+    /* Present it by Wayland surface directly */
+    SDL2_OVERLAY_PRESENT_TYPE_WAYLAND,
+    SDL2_OVERLAY_PRESENT_TYPE_NUM,
+};
+
 struct sdl2_console {
     DisplayGLCtx dgc;
     DisplayChangeListener dcl;
@@ -68,6 +79,7 @@ struct sdl2_console {
     bool y0_top;
     bool scanout_mode;
 #endif
+    enum sdl2_overlay_present_type present_type;
 };
 
 void sdl2_window_create(struct sdl2_console *scon);

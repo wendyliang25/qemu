@@ -260,6 +260,9 @@ void sdl2_gl_overlay_dmabuf(DisplayChangeListener *dcl, QemuDmaBuf *dmabuf,
     egl_overlay_fb *ov;
     int ov_slot;
 
+    if (scon->present_type != SDL2_OVERLAY_PRESENT_TYPE_BLIT)
+        return;
+
     assert(scon->opengl);
     SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
 
@@ -357,6 +360,9 @@ void sdl2_gl_overlay_flush(DisplayChangeListener *dcl, uint32_t id,
     egl_overlay_fb *ov;
     int ov_slot;
     int ww, wh;
+
+    if (scon->present_type != SDL2_OVERLAY_PRESENT_TYPE_BLIT)
+        return;
 
     assert(scon->opengl);
     if (!scon->scanout_mode) {
