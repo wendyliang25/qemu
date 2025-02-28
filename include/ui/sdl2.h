@@ -53,6 +53,31 @@ enum sdl2_overlay_present_type {
     SDL2_OVERLAY_PRESENT_TYPE_NUM,
 };
 
+/* Only support scanout mode */
+struct sdl2_sub_window {
+    struct sdl2_console *parent;
+    SDL_Window *window;
+    SDL_GLContext gl_context;        /* GL context for this window */
+    uint32_t id;                     /* Associated Resource ID */
+    uint32_t x;                      /* Position relative to parent */
+    uint32_t y;
+    uint32_t width;                  /* Buffer size */
+    uint32_t height;
+    uint32_t src_x;                  /* Source rectangle in buffer */
+    uint32_t src_y;
+    uint32_t src_width;              /* Use for window sizeing too */
+    uint32_t src_height;
+    uint32_t alpha;                  /* Plane alpha value */
+    uint32_t zpos;
+    bool valid;                     /* Window visibility state */
+    struct sdl2_sub_window *next;   /* Next sub-window in list */
+#ifdef CONFIG_OPENGL
+    egl_fb guest_fb;
+    egl_fb win_fb;
+    bool y0_top;
+#endif
+};
+
 struct sdl2_console {
     DisplayGLCtx dgc;
     DisplayChangeListener dcl;
@@ -80,6 +105,8 @@ struct sdl2_console {
     bool scanout_mode;
 #endif
     enum sdl2_overlay_present_type present_type;
+    struct sdl2_sub_window *sub_windows;  /* List of sub-windows */
+    int num_sub_windows;
 };
 
 void sdl2_window_create(struct sdl2_console *scon);
