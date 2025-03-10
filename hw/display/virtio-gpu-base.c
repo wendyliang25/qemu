@@ -220,13 +220,11 @@ virtio_gpu_base_device_realize(DeviceState *qdev,
         virtio_add_queue(vdev, 16, cursor_cb);
     }
 
-    g->enabled_output_bitmask = 1;
-
-    g->req_state[0].width = g->conf.xres;
-    g->req_state[0].height = g->conf.yres;
-
     g->hw_ops = &virtio_gpu_ops;
     for (i = 0; i < g->conf.max_outputs; i++) {
+        g->enabled_output_bitmask |= (1 << i);
+        g->req_state[i].width = g->conf.xres;
+        g->req_state[i].height = g->conf.yres;
         g->scanout[i].con =
             graphic_console_init(DEVICE(g), i, &virtio_gpu_ops, g);
     }
