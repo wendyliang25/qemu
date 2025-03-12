@@ -823,34 +823,65 @@ static void sdl2_handle_sub_window_event(struct sdl2_console *scon,
         SDL_PushEvent(&new_ev);
         break;
 
-    case SDL_WINDOWEVENT:
-        switch (ev->window.event) {
-        case SDL_WINDOWEVENT_FOCUS_GAINED:
-            if (scon->real_window) {
-                SDL_RaiseWindow(scon->real_window);
-            }
-            break;
-        }
+    case SDL_KEYDOWN:
+    case SDL_KEYUP:
+    case SDL_TEXTINPUT:
+        new_ev = *ev;
+        new_ev.key.windowID = scon->real_window ? SDL_GetWindowID(scon->real_window) : 0;
+        SDL_PushEvent(&new_ev);
         break;
     }
 }
 
-static void sdl2_poll_sub_windows(struct sdl2_console *scon)
+static int sdl2_event_filter(void *userdata, SDL_Event *event)
 {
-    struct sdl2_sub_window *sub;
-    SDL_Event ev;
-
-    for (sub = scon->sub_windows; sub != NULL; sub = sub->next) {
-        while (SDL_PeepEvents(&ev, 1, SDL_GETEVENT,
-                            SDL_FIRSTEVENT, SDL_LASTEVENT) > 0) {
-            if (ev.window.windowID == SDL_GetWindowID(sub->window)) {
-                sdl2_handle_sub_window_event(scon, sub, &ev);
-            } else {
-                SDL_PushEvent(&ev);
+    int i;
+    uint32_t window_id = 0;
+    
+    switch (event->type) {
+    case SDL_MOUSEMOTION:
+        window_id = event->motion.windowID;
                 break;
+    case SDL_MOUSEBUTTONDOWN:
+    case SDL_MOUSEBUTTONUP:
+        window_id = event->button.windowID;
+        break;
+    case SDL_MOUSEWHEEL:
+        window_id = event->wheel.windowID;
+        break;
+    case SDL_KEYDOWN:
+    case SDL_KEYUP:
+        window_id = event->key.windowID;
+        break;
+    case SDL_TEXTINPUT:
+        window_id = event->text.windowID;
+        break;
+    case SDL_WINDOWEVENT:
+        window_id = event->window.windowID;
+        break;
+    default:
+        return 1;
+    }
+    
+    for (i = 0; i < sdl2_num_outputs; i++) {
+        if(sdl2_console[i].real_window == NULL ){
+            continue;
+        }
+        if (SDL_GetWindowID(sdl2_console[i].real_window) == window_id) {
+            return 1;
+        }
+        if(sdl2_console[i].num_sub_windows > 0){
+            struct sdl2_sub_window *sub;
+            for (sub = sdl2_console[i].sub_windows; sub != NULL; sub = sub->next) {
+                if (sub->valid && SDL_GetWindowID(sub->window) == window_id) {
+                    sdl2_handle_sub_window_event(&sdl2_console[i], sub, event);
+                    return 0;   
+                }
             }
         }
     }
+    
+    return 0;
 }
 
 
@@ -862,11 +893,6 @@ static void handle_windowevent(SDL_Event *ev)
     if (!scon) {
         return;
     }
-
-    /* First poll sub-window events */
-    sdl2_poll_sub_windows(scon);
-
-    /* Then handle main window events */
 
     switch (ev->window.event) {
     case SDL_WINDOWEVENT_RESIZED:
@@ -1260,6 +1286,8 @@ static void sdl2_display_init(DisplayState *ds, DisplayOptions *o)
     if (icon) {
         SDL_SetWindowIcon(sdl2_console[0].real_window, icon);
     }
+    /* add event filter for sub window */
+    SDL_SetEventFilter(sdl2_event_filter, NULL);
 
     mouse_mode_notifier.notify = sdl_mouse_mode_change;
     qemu_add_mouse_mode_change_notifier(&mouse_mode_notifier);
