@@ -687,7 +687,7 @@ struct sdl2_sub_window * sdl2_create_sub_window(struct sdl2_console *parent,
     sub->id = plane_id;
     sub->width = width;
     sub->height = height;
-
+    
     /* Create borderless, click-through window */
     SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
     SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_ALLOW_LIBDECOR, "0");
@@ -705,6 +705,10 @@ struct sdl2_sub_window * sdl2_create_sub_window(struct sdl2_console *parent,
         g_free(sub);
         return NULL;
     }
+
+    SDL_SetWindowKeyboardGrab(sub->window, SDL_FALSE);
+    SDL_SetWindowMouseGrab(sub->window, SDL_FALSE);
+    sub->flush_count=0;
 
 #ifdef CONFIG_OPENGL
     if (parent->opengl) {
@@ -747,6 +751,7 @@ void sdl2_destroy_sub_window(struct sdl2_console *parent,
             if (sub->gl_context) {
                 SDL_GL_DeleteContext(sub->gl_context);
             }
+            egl_fb_destroy(&sub->win_fb);
 #endif
             SDL_DestroyWindow(sub->window);
             g_free(sub);
@@ -755,8 +760,33 @@ void sdl2_destroy_sub_window(struct sdl2_console *parent,
     }
 }
 
+/**/
+void sdl2_clean_invalid_sub_windows(struct sdl2_console *parent){
+    struct sdl2_sub_window *sub, *prev = NULL;
+    for (sub = parent->sub_windows; sub != NULL; prev = sub, sub = sub->next) {
+        if (!sub->valid) {
+            if (prev) {
+                prev->next = sub->next;
+            } else {
+                parent->sub_windows = sub->next;
+            }
+            parent->num_sub_windows--;
+#ifdef CONFIG_OPENGL
+            if (sub->gl_context) {
+                SDL_GL_DeleteContext(sub->gl_context);
+            }
+            egl_fb_destroy(&sub->win_fb);
+#endif
+            SDL_DestroyWindow(sub->window);
+            g_free(sub);
+        }
+    }
+    
+    SDL_SetWindowGrab(parent->real_window, SDL_TRUE);
+}
 
-/* Sub-window position management, called when parent window move or resize */
+
+/* Sub-window position management, called when parent window move / resize */
 static void sdl2_update_sub_window_positions(struct sdl2_console *parent)
 {
     struct sdl2_sub_window *sub;
@@ -765,9 +795,11 @@ static void sdl2_update_sub_window_positions(struct sdl2_console *parent)
     SDL_GetWindowPosition(parent->real_window, &parent_x, &parent_y);
 
     for (sub = parent->sub_windows; sub != NULL; sub = sub->next) {
-        win_x = parent_x + sub->x;
-        win_y = parent_y + sub->y;
-        SDL_SetWindowPosition(sub->window, win_x, win_y);
+        if(sub->valid){
+            win_x = parent_x + sub->x;
+            win_y = parent_y + sub->y;
+            SDL_SetWindowPosition(sub->window, win_x, win_y);
+        }
     }
 }
 
@@ -841,7 +873,7 @@ static int sdl2_event_filter(void *userdata, SDL_Event *event)
     switch (event->type) {
     case SDL_MOUSEMOTION:
         window_id = event->motion.windowID;
-                break;
+        break;
     case SDL_MOUSEBUTTONDOWN:
     case SDL_MOUSEBUTTONUP:
         window_id = event->button.windowID;
@@ -927,6 +959,9 @@ static void handle_windowevent(SDL_Event *ev)
          * key is released.
          */
         scon->ignore_hotkeys = get_mod_state();
+
+        /* Clean up all invalid sub-windows safely */
+        sdl2_clean_invalid_sub_windows(scon);
         break;
     case SDL_WINDOWEVENT_FOCUS_LOST:
         if (qemu_console_is_graphic(scon->dcl.con)) {
@@ -1288,7 +1323,7 @@ static void sdl2_display_init(DisplayState *ds, DisplayOptions *o)
     }
     /* add event filter for sub window */
     SDL_SetEventFilter(sdl2_event_filter, NULL);
-
+    
     mouse_mode_notifier.notify = sdl_mouse_mode_change;
     qemu_add_mouse_mode_change_notifier(&mouse_mode_notifier);
 

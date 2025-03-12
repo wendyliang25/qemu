@@ -138,6 +138,7 @@ void sdl2_gl_refresh(DisplayChangeListener *dcl)
         scon->updates = 0;
         sdl2_gl_render_surface(scon);
     }
+    sdl2_clean_invalid_sub_windows(scon);
     sdl2_poll_events(scon);
 }
 
@@ -358,6 +359,43 @@ bool sdl2_gl_has_dmabuf(DisplayChangeListener *dcl)
     return qemu_egl_has_dmabuf();
 }
 
+/**
+ * Synchronizes and manages flush states of SDL2 sub-windows
+ *
+ * This function maintains a flush synchronization system for all sub-windows
+ * attached to the main console window. It works by:
+ *
+ * 1. Incrementing the flush counter for each sub-window on every main window flush
+ * 2. Checking if any valid sub-window has exceeded the allowed timeout period
+ *    without being refreshed (SDL2_GL_OVERLAY_TIMEOUT cycles)
+ * 3. Marking timed-out sub-windows as invalid for later cleanup
+ * 4. Releasing window grab state to prevent input capture by stale windows
+ *
+ * Under normal operation, scanout flush and overlay flush are called together,
+ * keeping the flush_count at or near zero for active sub-windows. When a 
+ * sub-window's flush_count exceeds the timeout threshold, it indicates the
+ * overlay has likely become invalid (closed by guest, obscured by mouse cursor,
+ * or hidden behind transparent layers).
+ * 
+ * During cleanup, it's essential to forcibly release window grab state to
+ * prevent the Wayland compositor (like Weston) from losing 'pointer->focus',
+ * which could cause input handling issues in the overall desktop environment.
+ * 
+ * @param scon Pointer to the main SDL2 console structure
+ */
+static void sdl2_gl_subwin_flush_sync(struct sdl2_console *scon){
+    struct sdl2_sub_window *sub;
+    for(sub = scon->sub_windows; sub != NULL; sub=sub->next){
+        sub->flush_count++;
+        if (sub->valid){
+            if (sub->flush_count >= SDL2_GL_OVERLAY_TIMEOUT){
+                sub->valid = false;
+                SDL_SetWindowGrab(scon->real_window, SDL_FALSE);
+            }
+        }
+    }
+}
+
 void sdl2_gl_scanout_flush(DisplayChangeListener *dcl,
                            uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 {
@@ -380,6 +418,8 @@ void sdl2_gl_scanout_flush(DisplayChangeListener *dcl,
     egl_fb_blit(&scon->win_fb, &scon->guest_fb, !scon->y0_top);
 
     SDL_GL_SwapWindow(scon->real_window);
+
+    sdl2_gl_subwin_flush_sync(scon);
 }
 
 void sdl2_gl_overlay_flush(DisplayChangeListener *dcl, uint32_t id,
@@ -432,11 +472,12 @@ void sdl2_gl_overlay_flush(DisplayChangeListener *dcl, uint32_t id,
             return;
         }
 
+        sub->flush_count=0;
+        SDL_SetWindowPosition(sub->window, sub->x, sub->y);
+
         SDL_GL_MakeCurrent(sub->window, sub->gl_context);
         egl_fb_setup_default(&sub->win_fb, sub->src_width, sub->src_height);
-
         egl_fb_blit(&sub->win_fb, &sub->guest_fb, !sub->y0_top);
-        SDL_SetWindowPosition(sub->window, sub->x, sub->y);
         SDL_GL_SwapWindow(sub->window);
 
         SDL_GL_MakeCurrent(scon->real_window, scon->winctx);

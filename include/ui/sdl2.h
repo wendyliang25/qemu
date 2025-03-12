@@ -53,6 +53,8 @@ enum sdl2_overlay_present_type {
     SDL2_OVERLAY_PRESENT_TYPE_NUM,
 };
 
+/* Flushes subwindow can delay before destroy */
+#define SDL2_GL_OVERLAY_TIMEOUT     3
 /* Only support scanout mode */
 struct sdl2_sub_window {
     struct sdl2_console *parent;
@@ -70,6 +72,7 @@ struct sdl2_sub_window {
     uint32_t alpha;                  /* Plane alpha value */
     uint32_t zpos;
     bool valid;                     /* Window visibility state */
+    uint32_t flush_count;           /* Number of main-window flushed since last self flush */
     struct sdl2_sub_window *next;   /* Next sub-window in list */
 #ifdef CONFIG_OPENGL
     egl_fb guest_fb;
@@ -184,5 +187,7 @@ struct sdl2_sub_window * sdl2_create_sub_window(struct sdl2_console *parent,
 
 void sdl2_destroy_sub_window(struct sdl2_console *parent,
                             uint32_t plane_id);
+
+void sdl2_clean_invalid_sub_windows(struct sdl2_console *parent);
 
 #endif /* SDL2_H */
