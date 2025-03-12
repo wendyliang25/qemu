@@ -756,6 +756,104 @@ void sdl2_destroy_sub_window(struct sdl2_console *parent,
 }
 
 
+/* Sub-window position management, called when parent window move or resize */
+static void sdl2_update_sub_window_positions(struct sdl2_console *parent)
+{
+    struct sdl2_sub_window *sub;
+    int parent_x, parent_y, win_x, win_y;
+
+    SDL_GetWindowPosition(parent->real_window, &parent_x, &parent_y);
+
+    for (sub = parent->sub_windows; sub != NULL; sub = sub->next) {
+        win_x = parent_x + sub->x;
+        win_y = parent_y + sub->y;
+        SDL_SetWindowPosition(sub->window, win_x, win_y);
+    }
+}
+
+static void sdl2_transform_sub_to_main(struct sdl2_sub_window *sub,
+                                      int *x, int *y)
+{
+    if (!x || !y) {
+        return;
+    }
+
+    /* Add sub-window's position relative to main window */
+    *x += sub->x;
+    *y += sub->y;
+}
+
+static void sdl2_handle_sub_window_event(struct sdl2_console *scon,
+                                        struct sdl2_sub_window *sub,
+                                        SDL_Event *ev)
+{
+    int x, y;
+
+    switch (ev->type) {
+    case SDL_MOUSEMOTION:
+        /* Transform coordinates to main window space */
+        x = ev->motion.x;
+        y = ev->motion.y;
+        sdl2_transform_sub_to_main(sub, &x, &y);
+
+        /* Proxy new event to main window */
+        SDL_Event new_ev = *ev;
+        new_ev.motion.windowID = scon->real_window ? SDL_GetWindowID(scon->real_window) : 0;
+        new_ev.motion.x = x;
+        new_ev.motion.y = y;
+        SDL_PushEvent(&new_ev);
+        break;
+
+    case SDL_MOUSEBUTTONDOWN:
+    case SDL_MOUSEBUTTONUP:
+        x = ev->button.x;
+        y = ev->button.y;
+        sdl2_transform_sub_to_main(sub, &x, &y);
+
+        new_ev = *ev;
+        new_ev.button.windowID = scon->real_window ? SDL_GetWindowID(scon->real_window) : 0;
+        new_ev.button.x = x;
+        new_ev.button.y = y;
+        SDL_PushEvent(&new_ev);
+        break;
+
+    case SDL_MOUSEWHEEL:
+        new_ev = *ev;
+        new_ev.wheel.windowID = scon->real_window ? SDL_GetWindowID(scon->real_window) : 0;
+        SDL_PushEvent(&new_ev);
+        break;
+
+    case SDL_WINDOWEVENT:
+        switch (ev->window.event) {
+        case SDL_WINDOWEVENT_FOCUS_GAINED:
+            if (scon->real_window) {
+                SDL_RaiseWindow(scon->real_window);
+            }
+            break;
+        }
+        break;
+    }
+}
+
+static void sdl2_poll_sub_windows(struct sdl2_console *scon)
+{
+    struct sdl2_sub_window *sub;
+    SDL_Event ev;
+
+    for (sub = scon->sub_windows; sub != NULL; sub = sub->next) {
+        while (SDL_PeepEvents(&ev, 1, SDL_GETEVENT,
+                            SDL_FIRSTEVENT, SDL_LASTEVENT) > 0) {
+            if (ev.window.windowID == SDL_GetWindowID(sub->window)) {
+                sdl2_handle_sub_window_event(scon, sub, &ev);
+            } else {
+                SDL_PushEvent(&ev);
+                break;
+            }
+        }
+    }
+}
+
+
 static void handle_windowevent(SDL_Event *ev)
 {
     struct sdl2_console *scon = get_scon_from_window(ev->window.windowID);
@@ -764,6 +862,11 @@ static void handle_windowevent(SDL_Event *ev)
     if (!scon) {
         return;
     }
+
+    /* First poll sub-window events */
+    sdl2_poll_sub_windows(scon);
+
+    /* Then handle main window events */
 
     switch (ev->window.event) {
     case SDL_WINDOWEVENT_RESIZED:
@@ -775,6 +878,7 @@ static void handle_windowevent(SDL_Event *ev)
             dpy_set_ui_info(scon->dcl.con, &info, true);
         }
         sdl2_redraw(scon);
+        sdl2_update_sub_window_positions(scon);
         break;
     case SDL_WINDOWEVENT_EXPOSED:
         sdl2_redraw(scon);
@@ -832,6 +936,9 @@ static void handle_windowevent(SDL_Event *ev)
     case SDL_WINDOWEVENT_HIDDEN:
         scon->hidden = true;
         break;
+    case SDL_WINDOWEVENT_MOVED:
+        sdl2_update_sub_window_positions(scon);
+        break;
     }
 }
 
@@ -865,6 +972,12 @@ void sdl2_poll_events(struct sdl2_console *scon)
                 allow_close = false;
             }
             if (allow_close) {
+                struct sdl2_sub_window *sub = scon->sub_windows;
+                while (sub) {
+                    struct sdl2_sub_window *next = sub->next;
+                    sdl2_destroy_sub_window(scon, sub->id);
+                    sub = next;
+                }
                 shutdown_action = SHUTDOWN_ACTION_POWEROFF;
                 qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_UI);
             }
