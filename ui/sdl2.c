@@ -1220,7 +1220,7 @@ static void sdl2_display_init(DisplayState *ds, DisplayOptions *o)
         sdl2_console[i].opengl = display_opengl;
         sdl2_console[i].dcl.ops = display_opengl ? &dcl_gl_ops : &dcl_2d_ops;
         sdl2_console[i].dgc.ops = display_opengl ? &gl_ctx_ops : NULL;
-        sdl2_console[i].present_type = SDL2_OVERLAY_PRESENT_TYPE_BLIT;
+        sdl2_console[i].present_type = SDL2_OVERLAY_PRESENT_TYPE_SUBWIN;
         SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, true);
 #else
         sdl2_console[i].opengl = 0;

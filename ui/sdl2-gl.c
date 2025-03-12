@@ -257,42 +257,71 @@ void sdl2_gl_overlay_dmabuf(DisplayChangeListener *dcl, QemuDmaBuf *dmabuf,
                             uint32_t id)
 {
     struct sdl2_console *scon = container_of(dcl, struct sdl2_console, dcl);
-    egl_overlay_fb *ov;
-    int ov_slot;
-
-    if (scon->present_type != SDL2_OVERLAY_PRESENT_TYPE_BLIT)
-        return;
-
     assert(scon->opengl);
-    SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
 
-    egl_dmabuf_import_texture(dmabuf);
-    if (!dmabuf->texture) {
-        fprintf(stderr, "sdl2_gl_overlay_dmabuf failed fd=%d\n", dmabuf->fd);
-        return;
-    }
+    if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_BLIT){
+        egl_overlay_fb *ov;
+        int ov_slot;
 
-    ov_slot = sdl2_gl_find_overlay_by_id(scon, id);
-    if (ov_slot < 0) {
-        fprintf(stderr, "invalid overlay id=%d\n", id);
-        return;
-    }
-    ov = &scon->guest_overlay_fbs[ov_slot];
-    if (!ov->valid) {
-        ov->valid = true;
-        ov->id = id;
-    }
-    ov->width = dmabuf->width;
-    ov->height = dmabuf->height;
-    ov->alpha = dmabuf->alpha;
-    ov->zpos = dmabuf->zpos;
-    ov->x_coord = dmabuf->x_coord;
-    ov->y_coord = dmabuf->y_coord;
+        SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
 
-    egl_fb_setup_for_tex(&ov->fb, ov->width, ov->height, dmabuf->texture, false);
+        egl_dmabuf_import_texture(dmabuf);
+        if (!dmabuf->texture) {
+            fprintf(stderr, "sdl2_gl_overlay_dmabuf failed fd=%d\n", dmabuf->fd);
+            return;
+        }
 
-    if (dmabuf->allow_fences) {
-        ov->fb.dmabuf = dmabuf;
+        ov_slot = sdl2_gl_find_overlay_by_id(scon, id);
+        if (ov_slot < 0) {
+            fprintf(stderr, "invalid overlay id=%d\n", id);
+            return;
+        }
+        ov = &scon->guest_overlay_fbs[ov_slot];
+        if (!ov->valid) {
+            ov->valid = true;
+            ov->id = id;
+        }
+        ov->width = dmabuf->width;
+        ov->height = dmabuf->height;
+        ov->alpha = dmabuf->alpha;
+        ov->zpos = dmabuf->zpos;
+        ov->x_coord = dmabuf->x_coord;
+        ov->y_coord = dmabuf->y_coord;
+
+        egl_fb_setup_for_tex(&ov->fb, ov->width, ov->height, dmabuf->texture, false);
+
+        if (dmabuf->allow_fences) {
+            ov->fb.dmabuf = dmabuf;
+        }
+    } else if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_SUBWIN) {
+        sdl2_update_sub_window(scon, id, dmabuf->x_coord, dmabuf->y_coord, dmabuf->width, dmabuf->height, 0, 0, dmabuf->width, dmabuf->height, dmabuf->zpos, dmabuf->alpha);
+
+        struct sdl2_sub_window *sub=sdl2_find_sub_window(scon, id);
+        if (!sub || !sub->window) {
+            fprintf(stderr, "sdl2_gl_overlay_dmabuf: sub-window not found for plane %u , id invalid or not created\n", id);
+            return;
+        }
+
+        SDL_GL_MakeCurrent(sub->window, sub->gl_context);
+
+        egl_dmabuf_import_texture(dmabuf);
+        if (!dmabuf->texture) {
+            fprintf(stderr, "sdl2_gl_overlay_dmabuf failed import fd=%d\n", dmabuf->fd);
+            return;
+        }
+        egl_fb_setup_for_tex(&sub->guest_fb,
+                            dmabuf->width, dmabuf->height,
+                            dmabuf->texture,
+                            false);
+
+        if (dmabuf->allow_fences) {
+            sub->guest_fb.dmabuf = dmabuf;
+        }
+        sub->y0_top = dmabuf->y0_top;
+
+        SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
+    } else {
+        fprintf(stderr, "sdl2_gl_overlay_dmabuf type %d not supported\n", scon->present_type);
     }
 }
 
@@ -357,42 +386,64 @@ void sdl2_gl_overlay_flush(DisplayChangeListener *dcl, uint32_t id,
                            uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 {
     struct sdl2_console *scon = container_of(dcl, struct sdl2_console, dcl);
-    egl_overlay_fb *ov;
-    int ov_slot;
-    int ww, wh;
-
-    if (scon->present_type != SDL2_OVERLAY_PRESENT_TYPE_BLIT)
-        return;
-
     assert(scon->opengl);
-    if (!scon->scanout_mode) {
-        return;
+    if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_BLIT){
+
+        egl_overlay_fb *ov;
+        int ov_slot;
+        int ww, wh;
+
+        if (!scon->scanout_mode) {
+            return;
+        }
+
+        ov_slot = sdl2_gl_find_overlay_by_id(scon, id);
+        if (ov_slot < 0) {
+            fprintf(stderr, "invalid overlay id=%d\n", id);
+            return;
+        }
+
+        ov = &scon->guest_overlay_fbs[ov_slot];
+        assert(ov->valid);
+
+        if (!ov->fb.framebuffer) {
+            return;
+        }
+
+        /* TODO, only process x/y/w/h, while not the whole overlay FB */
+
+        /* Drawing is synchronous here, so no need to use graphic_hw_gl_block. */
+        SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
+
+        SDL_GetWindowSize(scon->real_window, &ww, &wh);
+        egl_fb_setup_default(&scon->win_fb, ww, wh);
+        egl_fb_blit_overlay(&scon->win_fb, &ov->fb, !scon->y0_top, ov->x_coord,
+                            ov->y_coord);
+
+        SDL_GL_SwapWindow(scon->real_window);
+    }else if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_SUBWIN) {
+        struct sdl2_sub_window *sub = sdl2_find_sub_window(scon, id);
+        if (!sub || !sub->window) {
+            fprintf(stderr,"sdl2_gl_overlay_flush: sub-window not found for plane %u\n",
+                    id);
+            return;
+        }
+        if (!sub->guest_fb.framebuffer) {
+            return;
+        }
+
+        SDL_GL_MakeCurrent(sub->window, sub->gl_context);
+        egl_fb_setup_default(&sub->win_fb, sub->src_width, sub->src_height);
+
+        egl_fb_blit(&sub->win_fb, &sub->guest_fb, !sub->y0_top);
+
+        SDL_GL_SwapWindow(sub->window);
+
+        SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
+
+    } else {
+        fprintf(stderr, "sdl2_gl_overlay_flush: type %d not supported\n", scon->present_type);
     }
-
-    ov_slot = sdl2_gl_find_overlay_by_id(scon, id);
-    if (ov_slot < 0) {
-        fprintf(stderr, "invalid overlay id=%d\n", id);
-        return;
-    }
-
-    ov = &scon->guest_overlay_fbs[ov_slot];
-    assert(ov->valid);
-
-    if (!ov->fb.framebuffer) {
-        return;
-    }
-
-    /* TODO, only process x/y/w/h, while not the whole overlay FB */
-
-    /* Drawing is synchronous here, so no need to use graphic_hw_gl_block. */
-    SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
-
-    SDL_GetWindowSize(scon->real_window, &ww, &wh);
-    egl_fb_setup_default(&scon->win_fb, ww, wh);
-    egl_fb_blit_overlay(&scon->win_fb, &ov->fb, !scon->y0_top, ov->x_coord,
-                        ov->y_coord);
-
-    SDL_GL_SwapWindow(scon->real_window);
 }
 
 void sdl2_gl_set_hdcp(DisplayChangeListener *dcl, uint32_t type, uint32_t mode)
