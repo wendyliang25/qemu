@@ -436,7 +436,7 @@ void sdl2_gl_overlay_flush(DisplayChangeListener *dcl, uint32_t id,
         egl_fb_setup_default(&sub->win_fb, sub->src_width, sub->src_height);
 
         egl_fb_blit(&sub->win_fb, &sub->guest_fb, !sub->y0_top);
-
+        SDL_SetWindowPosition(sub->window, sub->x, sub->y);
         SDL_GL_SwapWindow(sub->window);
 
         SDL_GL_MakeCurrent(scon->real_window, scon->winctx);

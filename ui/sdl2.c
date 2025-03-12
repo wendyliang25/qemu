@@ -693,12 +693,12 @@ struct sdl2_sub_window * sdl2_create_sub_window(struct sdl2_console *parent,
     SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_ALLOW_LIBDECOR, "0");
     SDL_SetHint(SDL_HINT_VIDEO_WINDOW_SHARE_PIXEL_FORMAT, "1");
 
-    sub->window = SDL_CreateWindow("QEMU DRM Plane",
+    sub->window = SDL_CreatePopupWindow(parent->real_window,
                                  SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
                                  width, height,
                                  SDL_WINDOW_OPENGL | SDL_WINDOW_BORDERLESS |
                                  SDL_WINDOW_ALWAYS_ON_TOP | SDL_WINDOW_SHOWN |
-                                 SDL_WINDOW_SKIP_TASKBAR |SDL_WINDOW_UTILITY );
+                                 SDL_WINDOW_SKIP_TASKBAR |SDL_WINDOW_POPUP_MENU );
 
     if (!sub->window) {
         fprintf(stderr, "could not create sub-window: %s\n", SDL_GetError());
