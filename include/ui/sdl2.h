@@ -164,4 +164,25 @@ void sdl2_set_dpms(DisplayChangeListener *dcl, uint32_t level);
 
 void sdl2_gl_set_hdcp(DisplayChangeListener *dcl, uint32_t type, uint32_t mode);
 
+/* Sub-window management functions */
+struct sdl2_sub_window *sdl2_find_sub_window(struct sdl2_console *parent,
+                            uint32_t plane_id);
+
+void sdl2_update_sub_window(struct sdl2_console *parent,
+                            uint32_t plane_id,
+                            uint32_t x, uint32_t y,
+                            uint32_t width, uint32_t height,
+                            uint32_t src_x, uint32_t src_y,
+                            uint32_t src_width, uint32_t src_height,
+                            uint32_t zpos, uint8_t alpha);
+
+
+struct sdl2_sub_window * sdl2_create_sub_window(struct sdl2_console *parent,
+                                                uint32_t plane_id,
+                                                uint32_t width, uint32_t height);
+
+
+void sdl2_destroy_sub_window(struct sdl2_console *parent,
+                            uint32_t plane_id);
+
 #endif /* SDL2_H */

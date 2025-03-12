@@ -626,6 +626,136 @@ static void handle_mousewheel(SDL_Event *ev)
     qemu_input_event_sync();
 }
 
+
+struct sdl2_sub_window *sdl2_find_sub_window(struct sdl2_console *parent,
+                                             uint32_t id)
+{
+    struct sdl2_sub_window *sub;
+    for (sub = parent->sub_windows; sub != NULL; sub = sub->next) {
+        if (sub->id == id) {
+            return sub;
+        }
+    }
+    return NULL;
+}
+
+void sdl2_update_sub_window(struct sdl2_console *parent,
+                            uint32_t plane_id,
+                            uint32_t x, uint32_t y,
+                            uint32_t width, uint32_t height,
+                            uint32_t src_x, uint32_t src_y,
+                            uint32_t src_width, uint32_t src_height,
+                            uint32_t zpos, uint8_t alpha)
+{
+    struct sdl2_sub_window *sub = sdl2_find_sub_window(parent, plane_id);
+
+    if (!sub) {
+        sub=sdl2_create_sub_window(parent, plane_id, width, height);
+    }
+
+    sub->x = x;
+    sub->y = y;
+    sub->width = width;
+    sub->height = height;
+    sub->src_x = src_x;
+    sub->src_y = src_y;
+    sub->src_width = src_width;
+    sub->src_height = src_height;
+    sub->alpha = alpha;
+    sub->zpos = zpos;
+    sub->valid = true;
+
+    int parent_x, parent_y, win_x, win_y;
+    /* Update window position relative to parent */
+    SDL_GetWindowPosition(parent->real_window, &parent_x, &parent_y);
+    win_x = parent_x + x;
+    win_y = parent_y + y;
+    SDL_SetWindowPosition(sub->window, win_x, win_y);
+    SDL_SetWindowSize(sub->window, width, height);
+    SDL_SetWindowOpacity(sub->window, alpha / 255.0f);
+}
+
+struct sdl2_sub_window * sdl2_create_sub_window(struct sdl2_console *parent,
+                                                uint32_t plane_id,
+                                                uint32_t width, uint32_t height)
+{
+    struct sdl2_sub_window *sub;
+    SDL_Window *parent_win = parent->real_window;
+
+    sub = g_new0(struct sdl2_sub_window, 1);
+    sub->parent = parent;
+    sub->id = plane_id;
+    sub->width = width;
+    sub->height = height;
+
+    /* Create borderless, click-through window */
+    SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
+    SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_ALLOW_LIBDECOR, "0");
+    SDL_SetHint(SDL_HINT_VIDEO_WINDOW_SHARE_PIXEL_FORMAT, "1");
+
+    sub->window = SDL_CreateWindow("QEMU DRM Plane",
+                                 SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
+                                 width, height,
+                                 SDL_WINDOW_OPENGL | SDL_WINDOW_BORDERLESS |
+                                 SDL_WINDOW_ALWAYS_ON_TOP | SDL_WINDOW_SHOWN |
+                                 SDL_WINDOW_SKIP_TASKBAR |SDL_WINDOW_UTILITY );
+
+    if (!sub->window) {
+        fprintf(stderr, "could not create sub-window: %s\n", SDL_GetError());
+        g_free(sub);
+        return NULL;
+    }
+
+#ifdef CONFIG_OPENGL
+    if (parent->opengl) {
+        SDL_GL_MakeCurrent(parent_win, parent->winctx);
+        SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1);
+
+        sub->gl_context = SDL_GL_CreateContext(sub->window);
+        if (!sub->gl_context) {
+            fprintf(stderr, "SDL2: Could not create GL context for sub-window: %s\n",
+                        SDL_GetError());
+            SDL_DestroyWindow(sub->window);
+            g_free(sub);
+            return NULL;
+        }
+    }
+#endif
+
+    sub->next = parent->sub_windows;
+    parent->sub_windows = sub;
+    parent->num_sub_windows++;
+
+    return sub;
+}
+
+void sdl2_destroy_sub_window(struct sdl2_console *parent,
+                             uint32_t plane_id)
+{
+    struct sdl2_sub_window *sub, *prev = NULL;
+
+    for (sub = parent->sub_windows; sub != NULL; prev = sub, sub = sub->next) {
+        if (sub->id == plane_id) {
+            if (prev) {
+                prev->next = sub->next;
+            } else {
+                parent->sub_windows = sub->next;
+            }
+            parent->num_sub_windows--;
+
+#ifdef CONFIG_OPENGL
+            if (sub->gl_context) {
+                SDL_GL_DeleteContext(sub->gl_context);
+            }
+#endif
+            SDL_DestroyWindow(sub->window);
+            g_free(sub);
+            break;
+        }
+    }
+}
+
+
 static void handle_windowevent(SDL_Event *ev)
 {
     struct sdl2_console *scon = get_scon_from_window(ev->window.windowID);
@@ -972,6 +1102,7 @@ static void sdl2_display_init(DisplayState *ds, DisplayOptions *o)
         }
         sdl2_console[i].idx = i;
         sdl2_console[i].opts = o;
+        sdl2_console[i].num_sub_windows = 0;
 #ifdef CONFIG_OPENGL
         sdl2_console[i].opengl = display_opengl;
         sdl2_console[i].dcl.ops = display_opengl ? &dcl_gl_ops : &dcl_2d_ops;
