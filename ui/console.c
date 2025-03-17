@@ -2701,8 +2701,7 @@ void qemu_console_resize(QemuConsole *s, int width, int height)
     if ((s->scanout.kind != SCANOUT_SURFACE ||
          (surface && surface->flags & QEMU_ALLOCATED_FLAG)) &&
         qemu_console_get_width(s, -1) == width &&
-        qemu_console_get_height(s, -1) == height &&
-        (surface && !is_placeholder(surface))) {
+        qemu_console_get_height(s, -1) == height) {
         return;
     }
 
