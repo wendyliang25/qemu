@@ -766,7 +766,7 @@ static void xen_pt_destroy(PCIDevice *d) {
 }
 /* init */
 
-#if CONFIG_XEN_CTRL_INTERFACE_VERSION >= 42000
+#if CONFIG_XEN_CTRL_INTERFACE_VERSION >= 41800
 static bool xen_pt_need_gsi(void)
 {
     FILE *fp;
@@ -898,7 +898,7 @@ static void xen_pt_realize(PCIDevice *d, Error **errp)
         goto out;
     }
 
-#if CONFIG_XEN_CTRL_INTERFACE_VERSION >= 42000
+#if CONFIG_XEN_CTRL_INTERFACE_VERSION >= 41800
     if (xen_pt_need_gsi()) {
         rc = xen_pt_map_pirq_for_gsi(d, &pirq);
     } else {
