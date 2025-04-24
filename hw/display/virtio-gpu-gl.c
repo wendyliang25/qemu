@@ -115,9 +115,11 @@ virtio_gpu_gl_update_status(VirtIODevice *vdev, uint8_t val)
             continue;
         if (val ==  VIRTIO_DEVICE_STATUS_D3) {
             dpy_gfx_update_surface_with_blank(b->scanout[i].con);
-            dpy_set_dpms(b->scanout[i].con, CON_DPMS_SUSPEND);
+            if (virtio_gpu_dpms_enabled(b->conf))
+                dpy_set_dpms(b->scanout[i].con, CON_DPMS_SUSPEND);
         } else {
-            dpy_set_dpms(b->scanout[i].con, CON_DPMS_ON);
+            if (virtio_gpu_dpms_enabled(b->conf))
+                dpy_set_dpms(b->scanout[i].con, CON_DPMS_ON);
         }
     }
 }

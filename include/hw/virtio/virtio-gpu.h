@@ -115,6 +115,7 @@ enum virtio_gpu_base_conf_flags {
     VIRTIO_GPU_FLAG_CONTEXT_INIT_ENABLED,
     VIRTIO_GPU_FLAG_RESOURCE_UUID_ENABLED,
     VIRTIO_GPU_FLAG_NATIVE_CONTEXT_ENABLED,
+    VIRTIO_GPU_FLAG_DPMS_ENABLED,
 };
 
 #define virtio_gpu_virgl_enabled(_cfg) \
@@ -136,6 +137,8 @@ enum virtio_gpu_base_conf_flags {
 #define virtio_gpu_native_context_enabled(_cfg) \
     ((_cfg.flags & (1 << VIRTIO_GPU_FLAG_NATIVE_CONTEXT_ENABLED) && \
      virtio_gpu_hostmem_enabled(_cfg) && virtio_gpu_context_init_enabled(_cfg)))
+#define virtio_gpu_dpms_enabled(_cfg) \
+    (_cfg.flags & (1 << VIRTIO_GPU_FLAG_DPMS_ENABLED))
 
 struct virtio_gpu_base_conf {
     uint32_t max_outputs;
@@ -189,7 +192,9 @@ struct VirtIOGPUBaseClass {
                     VIRTIO_GPU_FLAG_EDID_ENABLED, true), \
     DEFINE_PROP_UINT32("xres", _state, _conf.xres, 1280), \
     DEFINE_PROP_UINT32("yres", _state, _conf.yres, 800), \
-    DEFINE_PROP_STRING("max_overlays", _state, _conf.max_overlays_str)
+    DEFINE_PROP_STRING("max_overlays", _state, _conf.max_overlays_str), \
+    DEFINE_PROP_BIT("dpms", _state, _conf.flags, \
+                    VIRTIO_GPU_FLAG_DPMS_ENABLED, false)
 
 typedef struct VGPUDMABuf {
     QemuDmaBuf buf;
