@@ -1423,6 +1423,12 @@ if not get_option('rutabaga_gfx').auto() or have_system or have_vhost_user_gpu
                          method: 'pkg-config',
                          required: get_option('rutabaga_gfx'))
 endif
+drm_accel = not_found
+if not get_option('drm_accel').auto() or have_system
+  drm_accel = dependency('vxdna',
+                         method: 'pkg-config',
+                         required: get_option('drm_accel'))
+endif
 blkio = not_found
 if not get_option('blkio').auto() or have_block
   blkio = dependency('blkio',
@@ -4900,6 +4906,7 @@ summary_info += {'SDL image support': sdl_image}
 summary_info += {'GTK support':       gtk}
 summary_info += {'pixman':            pixman}
 summary_info += {'VTE support':       vte}
+summary_info += {'DRM based accelerator support': drm_accel}
 summary_info += {'PNG support':       png}
 summary_info += {'VNC support':       vnc}
 if vnc.found()
