@@ -1417,6 +1417,12 @@ if not get_option('virglrenderer').auto() or have_system or have_vhost_user_gpu
                      method: 'pkg-config',
                      required: get_option('virglrenderer'))
 endif
+drm_accel = not_found
+if not get_option('drm_accel').auto() or have_system or have_vhost_user_accel
+  drm_accel = dependency('vxdna',
+                         method: 'pkg-config',
+                         required: get_option('drm_accel'))
+endif
 rutabaga = not_found
 if not get_option('rutabaga_gfx').auto() or have_system or have_vhost_user_gpu
   rutabaga = dependency('rutabaga_gfx_ffi',
@@ -4898,6 +4904,7 @@ summary(summary_info, bool_yn: true, section: 'User interface')
 # Graphics backends
 summary_info = {}
 summary_info += {'VirGL support':     virgl}
+summary_info += {'DRM based accelerator support': drm_accel}
 summary_info += {'Rutabaga support':  rutabaga}
 summary(summary_info, bool_yn: true, section: 'Graphics backends')
 
