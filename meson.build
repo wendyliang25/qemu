@@ -791,6 +791,13 @@ if not get_option('virglrenderer').auto() or have_system or have_vhost_user_gpu
                                          dependencies: virgl))
   endif
 endif
+drm_accel = not_found
+if not get_option('drm_accel').auto() or have_system or have_vhost_user_accel
+  drm_accel = dependency('vxdna',
+                         method: 'pkg-config',
+                         required: get_option('drm_accel'),
+                         kwargs: static_kwargs)
+endif
 blkio = not_found
 if not get_option('blkio').auto() or have_block
   blkio = dependency('blkio',
@@ -4017,6 +4024,7 @@ summary_info += {'PAM':               pam}
 summary_info += {'iconv support':     iconv}
 summary_info += {'curses support':    curses}
 summary_info += {'virgl support':     virgl}
+summary_info += {'DRM based accelerator support': drm_accel}
 summary_info += {'blkio support':     blkio}
 summary_info += {'curl support':      curl}
 summary_info += {'Multipath support': mpathpersist}

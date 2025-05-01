@@ -92,6 +92,7 @@ meson_options_help() {
   printf "%s\n" '  dbus-display    -display dbus support'
   printf "%s\n" '  dmg             dmg image format support'
   printf "%s\n" '  docs            Documentations build support'
+  printf "%s\n" '  drm-accel       DRM accelerator support'
   printf "%s\n" '  dsound          DirectSound sound support'
   printf "%s\n" '  fuse            FUSE block device export'
   printf "%s\n" '  fuse-lseek      SEEK_HOLE/SEEK_DATA support for FUSE exports'
@@ -148,7 +149,6 @@ meson_options_help() {
   printf "%s\n" '  replication     replication support'
   printf "%s\n" '  sdl             SDL user interface'
   printf "%s\n" '  sdl-image       SDL Image support for icons'
-  printf "%s\n" '  wayland         Wayland user interface'
   printf "%s\n" '  seccomp         seccomp support'
   printf "%s\n" '  selinux         SELinux support in qemu-nbd'
   printf "%s\n" '  slirp           libslirp user mode network backend support'
@@ -185,6 +185,7 @@ meson_options_help() {
   printf "%s\n" '  vnc-sasl        SASL authentication for VNC server'
   printf "%s\n" '  vte             vte support for the gtk UI'
   printf "%s\n" '  vvfat           vvfat image format support'
+  printf "%s\n" '  wayland         Wayland user interface'
   printf "%s\n" '  whpx            WHPX acceleration support'
   printf "%s\n" '  xen             Xen backend support'
   printf "%s\n" '  xen-pci-passthrough'
@@ -263,6 +264,8 @@ _meson_option_parse() {
     --docdir=*) quote_sh "-Ddocdir=$2" ;;
     --enable-docs) printf "%s" -Ddocs=enabled ;;
     --disable-docs) printf "%s" -Ddocs=disabled ;;
+    --enable-drm-accel) printf "%s" -Ddrm_accel=enabled ;;
+    --disable-drm-accel) printf "%s" -Ddrm_accel=disabled ;;
     --enable-dsound) printf "%s" -Ddsound=enabled ;;
     --disable-dsound) printf "%s" -Ddsound=disabled ;;
     --enable-fdt) printf "%s" -Dfdt=enabled ;;
@@ -403,8 +406,6 @@ _meson_option_parse() {
     --disable-sdl) printf "%s" -Dsdl=disabled ;;
     --enable-sdl-image) printf "%s" -Dsdl_image=enabled ;;
     --disable-sdl-image) printf "%s" -Dsdl_image=disabled ;;
-    --enable-wayland) printf "%s" -Dwayland=enabled ;;
-    --disable-wayland) printf "%s" -Dwayland=disabled ;;
     --enable-seccomp) printf "%s" -Dseccomp=enabled ;;
     --disable-seccomp) printf "%s" -Dseccomp=disabled ;;
     --enable-selinux) printf "%s" -Dselinux=enabled ;;
@@ -480,6 +481,8 @@ _meson_option_parse() {
     --disable-vte) printf "%s" -Dvte=disabled ;;
     --enable-vvfat) printf "%s" -Dvvfat=enabled ;;
     --disable-vvfat) printf "%s" -Dvvfat=disabled ;;
+    --enable-wayland) printf "%s" -Dwayland=enabled ;;
+    --disable-wayland) printf "%s" -Dwayland=disabled ;;
     --enable-whpx) printf "%s" -Dwhpx=enabled ;;
     --disable-whpx) printf "%s" -Dwhpx=disabled ;;
     --enable-xen) printf "%s" -Dxen=enabled ;;

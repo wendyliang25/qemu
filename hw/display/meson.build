@@ -83,6 +83,13 @@ if config_all_devices.has_key('CONFIG_VIRTIO_GPU')
                          if_true: [files('virtio-gpu-gl.c', 'virtio-gpu-virgl.c'), pixman, virgl])
     hw_display_modules += {'virtio-gpu-gl': virtio_gpu_gl_ss}
   endif
+
+  if drm_accel.found()
+    virtio_accel_ss = ss.source_set()
+    virtio_accel_ss.add(when: ['CONFIG_VIRTIO_GPU'],
+                        if_true: [files('virtio-accel.c'), drm_accel])
+    hw_display_modules += {'virtio-accel': virtio_accel_ss}
+  endif
 endif
 
 if config_all_devices.has_key('CONFIG_VIRTIO_PCI')
@@ -98,6 +105,13 @@ if config_all_devices.has_key('CONFIG_VIRTIO_PCI')
     virtio_gpu_pci_gl_ss.add(when: ['CONFIG_VIRTIO_GPU', 'CONFIG_VIRTIO_PCI', virgl, opengl],
                              if_true: [files('virtio-gpu-pci-gl.c'), pixman])
     hw_display_modules += {'virtio-gpu-pci-gl': virtio_gpu_pci_gl_ss}
+  endif
+
+  if drm_accel.found()
+    virtio_accel_pci_ss = ss.source_set()
+    virtio_accel_pci_ss.add(when: ['CONFIG_VIRTIO_GPU', 'CONFIG_VIRTIO_PCI'],
+                            if_true: [files('virtio-accel-pci.c'), drm_accel])
+    hw_display_modules += {'virtio-accel-pci': virtio_accel_pci_ss}
   endif
 endif
 

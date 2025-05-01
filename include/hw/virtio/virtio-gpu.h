@@ -44,6 +44,10 @@ enum virgl_gpu_resource_type {
     VIRGL_GPU_RESOURCE_TYPE_OVERLAY,
     VIRGL_GPU_RESOURCE_TYPE_NUM,
 };
+
+#define TYPE_VIRTIO_ACCEL "virtio-accel-device"
+OBJECT_DECLARE_SIMPLE_TYPE(VirtIOAccel, VIRTIO_ACCEL)
+
 struct virtio_gpu_simple_resource {
     uint32_t resource_id;
     uint32_t width;
@@ -127,6 +131,7 @@ enum virtio_gpu_base_conf_flags {
     VIRTIO_GPU_FLAG_RESOURCE_UUID_ENABLED,
     VIRTIO_GPU_FLAG_NATIVE_CONTEXT_ENABLED,
     VIRTIO_GPU_FLAG_DPMS_ENABLED,
+    VIRTIO_GPU_FLAG_ACCEL_ENABLED,
 };
 
 #define virtio_gpu_virgl_enabled(_cfg) \
@@ -150,6 +155,8 @@ enum virtio_gpu_base_conf_flags {
      virtio_gpu_hostmem_enabled(_cfg) && virtio_gpu_context_init_enabled(_cfg)))
 #define virtio_gpu_dpms_enabled(_cfg) \
     (_cfg.flags & (1 << VIRTIO_GPU_FLAG_DPMS_ENABLED))
+#define virtio_accel_enabled(_cfg) \
+    (_cfg.flags & (1 << VIRTIO_GPU_FLAG_ACCEL_ENABLED))
 
 struct virtio_gpu_base_conf {
     uint32_t max_outputs;
