@@ -299,6 +299,11 @@ struct VirtIOGPURutabaga {
     struct rutabaga *rutabaga;
 };
 
+struct VirtIOAccel {
+    VirtIOGPU parent_obj;
+    char *accel_node;
+};
+
 #define VIRTIO_GPU_FILL_CMD(out) do {                                   \
         size_t virtiogpufillcmd_s_ =                                    \
             iov_to_buf(cmd->elem.out_sg, cmd->elem.out_num, 0,          \
