@@ -295,6 +295,11 @@ struct VhostUserGPU {
     bool backend_blocked;
 };
 
+struct VirtIOAccel {
+    VirtIOGPU parent_obj;
+    char *accel_node;
+};
+
 #define VIRTIO_GPU_FILL_CMD(out) do {                                   \
         size_t s;                                                       \
         s = iov_to_buf(cmd->elem.out_sg, cmd->elem.out_num, 0,          \
