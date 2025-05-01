@@ -115,6 +115,7 @@ meson_options_help() {
   printf "%s\n" '  dbus-display    -display dbus support'
   printf "%s\n" '  dmg             dmg image format support'
   printf "%s\n" '  docs            Documentations build support'
+  printf "%s\n" '  drm-accel       DRM accelerator support'
   printf "%s\n" '  dsound          DirectSound sound support'
   printf "%s\n" '  fuse            FUSE block device export'
   printf "%s\n" '  fuse-lseek      SEEK_HOLE/SEEK_DATA support for FUSE exports'
@@ -311,6 +312,8 @@ _meson_option_parse() {
     --docdir=*) quote_sh "-Ddocdir=$2" ;;
     --enable-docs) printf "%s" -Ddocs=enabled ;;
     --disable-docs) printf "%s" -Ddocs=disabled ;;
+    --enable-drm-accel) printf "%s" -Ddrm_accel=enabled ;;
+    --disable-drm-accel) printf "%s" -Ddrm_accel=disabled ;;
     --enable-dsound) printf "%s" -Ddsound=enabled ;;
     --disable-dsound) printf "%s" -Ddsound=disabled ;;
     --enable-fdt) printf "%s" -Dfdt=enabled ;;
