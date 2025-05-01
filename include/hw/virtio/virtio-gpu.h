@@ -42,6 +42,9 @@ OBJECT_DECLARE_SIMPLE_TYPE(VhostUserGPU, VHOST_USER_GPU)
 #define TYPE_VIRTIO_GPU_RUTABAGA "virtio-gpu-rutabaga-device"
 OBJECT_DECLARE_SIMPLE_TYPE(VirtIOGPURutabaga, VIRTIO_GPU_RUTABAGA)
 
+#define TYPE_VIRTIO_ACCEL "virtio-accel-device"
+OBJECT_DECLARE_SIMPLE_TYPE(VirtIOAccel, VIRTIO_ACCEL)
+
 struct virtio_gpu_simple_resource {
     uint32_t resource_id;
     uint32_t width;
@@ -101,6 +104,7 @@ enum virtio_gpu_base_conf_flags {
     VIRTIO_GPU_FLAG_VENUS_ENABLED,
     VIRTIO_GPU_FLAG_RESOURCE_UUID_ENABLED,
     VIRTIO_GPU_FLAG_DRM_ENABLED,
+    VIRTIO_GPU_FLAG_ACCEL_ENABLED,
 };
 
 #define virtio_gpu_virgl_enabled(_cfg) \
@@ -125,6 +129,8 @@ enum virtio_gpu_base_conf_flags {
     (_cfg.flags & (1 << VIRTIO_GPU_FLAG_VENUS_ENABLED))
 #define virtio_gpu_drm_enabled(_cfg) \
     (_cfg.flags & (1 << VIRTIO_GPU_FLAG_DRM_ENABLED))
+#define virtio_accel_enabled(_cfg) \
+    (_cfg.flags & (1 << VIRTIO_GPU_FLAG_ACCEL_ENABLED))
 
 struct virtio_gpu_base_conf {
     uint32_t max_outputs;
