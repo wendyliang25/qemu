@@ -59,6 +59,15 @@ virtio_gpu_inc_inflight_fences(uint32_t inflight) "in-flight+ %u"
 virtio_gpu_dec_inflight_fences(uint32_t inflight) "in-flight- %u"
 virtio_gpu_cmd_suspended(uint32_t cmd) "cmd 0x%x"
 
+# virtio-accel.c
+virtio_accel_cmd(uint32_t type, uint32_t ctx_id, uint32_t flags) "type=0x%x ctx=0x%x flags=0x%x"
+virtio_accel_cmd_ctx_create(uint32_t ctx_id, uint32_t nlen, const char *name, const char *node) "ctx=0x%x nlen=%u name=%s node=%s"
+virtio_accel_cmd_ctx_destroy(uint32_t ctx_id) "ctx=0x%x"
+virtio_accel_cmd_resource_create_blob(uint32_t resource_id, uint32_t ctx_id, uint64_t blob_id, uint32_t blob_flags, uint32_t blob_mem, uint64_t size) "resource_id=0x%x ctx_id=0x%x blob_id=0x%" PRIx64 " blob_flags=0x%x blob_mem=0x%x size=0x%" PRIx64
+virtio_accel_create_blob(uint32_t resource_id, uint32_t blob_mem, uint32_t nr_entries, uint64_t size, uint32_t ctx_id) "resource_id=0x%x blob_mem=0x%x nr_entries=%u size=0x%" PRIx64 " ctx=0x%x"
+virtio_accel_cmd_resource_map_blob(uint32_t resource_id, uint64_t offset, uint64_t size) "resource_id=0x%x offset=0x%" PRIx64 " size=0x%" PRIx64
+virtio_accel_cmd_resource_unmap_blob(uint32_t resource_id) "resource_id=0x%x"
+
 # qxl.c
 disable qxl_io_write_vga(int qid, const char *mode, uint32_t addr, uint32_t val) "%d %s addr=%u val=%u"
 qxl_create_guest_primary(int qid, uint32_t width, uint32_t height, uint64_t mem, uint32_t format, uint32_t position) "%d %ux%u mem=0x%" PRIx64 " %u,%u"
