@@ -299,6 +299,29 @@ struct VirtIOGPURutabaga {
     struct rutabaga *rutabaga;
 };
 
+struct accel_context_fence {
+    uint32_t ctx_id;
+    uint32_t ring_idx;
+    uint64_t fence_id;
+    QSLIST_ENTRY(accel_context_fence) next;
+};
+
+struct VirtIOAccel {
+    VirtIOGPU parent_obj;
+    char *accel_node;
+
+    /*
+     * Fence completions are delivered on the vaccel fence-polling thread, which
+     * is not a QEMU thread and must not touch g->fenceq / the virtqueue (or take
+     * the BQL) directly: ctx teardown joins that thread while holding the BQL, so
+     * grabbing the BQL from the callback would deadlock. The callback instead
+     * pushes onto this lock-free list and schedules fence_bh, which drains it on
+     * the main loop under the BQL. Mirrors virgl's async_fenceq/async_fence_bh.
+     */
+    QEMUBH *fence_bh;
+    QSLIST_HEAD(, accel_context_fence) async_fenceq;
+};
+
 /*
  * With 4 KiB pages and QEMU's VIRTQUEUE_MAX_SIZE (1024) mapped-iov
  * limit, the largest inline command is ~4 MiB.  Cap submit_3d
