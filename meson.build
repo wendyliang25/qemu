@@ -1388,6 +1388,12 @@ if not get_option('rutabaga_gfx').auto() or have_system or have_vhost_user_gpu
                          method: 'pkg-config',
                          required: get_option('rutabaga_gfx'))
 endif
+drm_accel = not_found
+if not get_option('drm_accel').auto() or have_system or have_vhost_user_accel
+  drm_accel = dependency('virglrenderer',
+                         method: 'pkg-config',
+                         required: get_option('drm_accel'))
+endif
 blkio = not_found
 if not get_option('blkio').auto() or have_block
   blkio = dependency('blkio',
@@ -4815,6 +4821,7 @@ summary(summary_info, bool_yn: true, section: 'User interface')
 summary_info = {}
 summary_info += {'VirGL support':     virgl}
 summary_info += {'Rutabaga support':  rutabaga}
+summary_info += {'DRM based accelerator support': drm_accel}
 summary(summary_info, bool_yn: true, section: 'Graphics backends')
 
 # Audio backends
