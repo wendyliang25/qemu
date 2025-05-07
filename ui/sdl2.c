@@ -254,6 +254,8 @@ static void sdl_show_cursor(struct sdl2_console *scon)
 static void sdl_grab_start(struct sdl2_console *scon)
 {
     QemuConsole *con = scon ? scon->dcl.con : NULL;
+    struct sdl2_sub_window *sub;
+    bool has_focus = false;
 
     if (!con || !qemu_console_is_graphic(con)) {
         return;
@@ -263,7 +265,13 @@ static void sdl_grab_start(struct sdl2_console *scon)
      * prevents 'SDL_WM_GrabInput(SDL_GRAB_ON)' from blocking all the
      * application (SDL bug).
      */
-    if (!(SDL_GetWindowFlags(scon->real_window) & SDL_WINDOW_INPUT_FOCUS)) {
+    for (sub = scon->sub_windows; sub != NULL; sub = sub->next) {
+        if (SDL_GetWindowFlags(sub->window) & SDL_WINDOW_INPUT_FOCUS) {
+            has_focus = true;
+            break;
+        }
+    }
+    if (!has_focus && !(SDL_GetWindowFlags(scon->real_window) & SDL_WINDOW_INPUT_FOCUS)) {
         return;
     }
     if (guest_cursor) {
