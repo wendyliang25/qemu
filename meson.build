@@ -1021,6 +1021,26 @@ else
   sdl_image = not_found
 endif
 
+wayland = not_found
+if not get_option('wayland').auto() or have_system
+  wayland_scanner = not_found
+  wayland_protocols = not_found
+  xkbcommon = not_found
+
+  wayland_client = dependency('wayland-client', required: get_option('wayland'))
+  wayland_cursor = dependency('wayland-cursor', required: get_option('wayland'))
+  xkbcommon = dependency('xkbcommon', required: get_option('wayland'))
+  wayland_protocols = dependency('wayland-protocols', required: get_option('wayland'))
+  wayland_scanner = find_program('wayland-scanner', required: get_option('wayland'))
+
+  if wayland_client.found() and wayland_cursor.found() and xkbcommon.found() and wayland_protocols.found() and wayland_scanner.found()
+    wayland = declare_dependency(
+      dependencies: [wayland_client, wayland_cursor, xkbcommon],
+    )
+  endif
+endif
+
+
 rbd = not_found
 if not get_option('rbd').auto() or have_block
   librados = cc.find_library('rados', required: get_option('rbd'),
@@ -1906,6 +1926,8 @@ config_host_data.set('CONFIG_RBD', rbd.found())
 config_host_data.set('CONFIG_RDMA', rdma.found())
 config_host_data.set('CONFIG_SDL', sdl.found())
 config_host_data.set('CONFIG_SDL_IMAGE', sdl_image.found())
+config_host_data.set('CONFIG_WAYLAND', wayland.found())
+config_host_data.set('HAVE_WAYLAND_PROTOCOLS', wayland_protocols.found())
 config_host_data.set('CONFIG_SECCOMP', seccomp.found())
 if seccomp.found()
   config_host_data.set('CONFIG_SECCOMP_SYSRAWRC', seccomp_has_sysrawrc)
@@ -3985,6 +4007,7 @@ if targetos == 'darwin'
 endif
 summary_info += {'SDL support':       sdl}
 summary_info += {'SDL image support': sdl_image}
+summary_info += {'Wayland support':   wayland}
 summary_info += {'GTK support':       gtk}
 summary_info += {'pixman':            pixman}
 summary_info += {'VTE support':       vte}

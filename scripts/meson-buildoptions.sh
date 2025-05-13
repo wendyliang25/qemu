@@ -148,6 +148,7 @@ meson_options_help() {
   printf "%s\n" '  replication     replication support'
   printf "%s\n" '  sdl             SDL user interface'
   printf "%s\n" '  sdl-image       SDL Image support for icons'
+  printf "%s\n" '  wayland         Wayland user interface'
   printf "%s\n" '  seccomp         seccomp support'
   printf "%s\n" '  selinux         SELinux support in qemu-nbd'
   printf "%s\n" '  slirp           libslirp user mode network backend support'
@@ -402,6 +403,8 @@ _meson_option_parse() {
     --disable-sdl) printf "%s" -Dsdl=disabled ;;
     --enable-sdl-image) printf "%s" -Dsdl_image=enabled ;;
     --disable-sdl-image) printf "%s" -Dsdl_image=disabled ;;
+    --enable-wayland) printf "%s" -Dwayland=enabled ;;
+    --disable-wayland) printf "%s" -Dwayland=disabled ;;
     --enable-seccomp) printf "%s" -Dseccomp=enabled ;;
     --disable-seccomp) printf "%s" -Dseccomp=disabled ;;
     --enable-selinux) printf "%s" -Dselinux=enabled ;;

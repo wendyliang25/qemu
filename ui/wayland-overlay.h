@@ -1,0 +1,116 @@
+#ifndef WAYLAND_OVERLAY_H
+#define WAYLAND_OVERLAY_H
+
+#include <wayland-client.h>
+#include "xdg-shell-client.h"
+#include "linux-dmabuf-v1-client.h"
+#include "viewporter-client.h"
+
+#include "ui/console.h"
+#include "qemu/queue.h"
+
+#define WAYLAND_OVERLAY_MAX_NUM 8
+#define WAYLAND_OVERLAY_MAX_IDLE_FRAMES 3
+
+/* Wayland buffer cache structure */
+struct wayland_buffer {
+    struct wl_buffer *wl_buffer;
+    uint32_t fd;
+    uint32_t width;
+    uint32_t height;
+    uint32_t format;
+};
+
+
+struct wayland_console;
+
+struct wayland_sub_window {
+    struct wl_surface *surface;
+    struct wl_subsurface *subsurface;
+
+    uint32_t id;
+    /* Position relative to parent window */
+    uint32_t x;
+    uint32_t y;
+    /* Buffer size */
+    uint32_t width;
+    uint32_t height;
+    /* Source rectangle position in buffer */
+    uint32_t src_x;
+    uint32_t src_y;
+    /* For window resizing */
+    uint32_t src_width;
+    uint32_t src_height;
+    /* Alpha value */
+    uint32_t alpha;
+    /* Z-order */
+    uint32_t zpos;
+    bool valid;
+    /* Main window refresh count since last flush */
+    uint32_t flush_count;
+
+    QemuDmaBuf *dmabuf;
+    bool buffer_queued;
+
+    struct wl_callback *frame_callback;
+    bool framing;
+
+    QLIST_ENTRY(wayland_sub_window) next;
+
+    struct wayland_console *wl_console;
+};
+
+/* Sub-window list head using QLIST */
+typedef QLIST_HEAD(, wayland_sub_window) wayland_sub_window_list;
+
+/* Main console structure extension - needs to be integrated with existing code */
+struct wayland_console {
+    void *parent_console;
+    struct wl_surface *main_surface;
+    struct wl_display *display;
+    wayland_sub_window_list sub_windows;
+    int num_sub_windows;
+    struct zwp_linux_dmabuf_v1 *dmabuf_manager;
+    struct wl_compositor *compositor;
+    struct wl_subcompositor *subcompositor;
+};
+
+/* API function declarations */
+struct wayland_sub_window *wayland_find_sub_window(struct wayland_console *parent,
+                                  uint32_t plane_id);
+
+void wayland_update_sub_window(struct wayland_console *parent,
+                               uint32_t plane_id,
+                               uint32_t x, uint32_t y,
+                               uint32_t width, uint32_t height,
+                               uint32_t src_x, uint32_t src_y,
+                               uint32_t src_width, uint32_t src_height,
+                               uint32_t zpos, uint8_t alpha);
+
+struct wayland_sub_window *wayland_create_sub_window(struct wayland_console *parent,
+                                     uint32_t plane_id,
+                                     uint32_t width, uint32_t height);
+
+void wayland_destroy_sub_window(struct wayland_console *parent,
+                                uint32_t plane_id);
+
+/* Used by sdl2_gl_subwin_flush_sync */
+void wayland_flush_sync_sub_window(struct wayland_console *parent);
+
+void wayland_clean_invalid_sub_windows(struct wayland_console *parent);
+
+/* Used by sdl2_gl_overlay_dmabuf */
+void wayland_update_dmabuf(struct wayland_sub_window *sub,
+                           QemuDmaBuf *dmabuf);
+/* Used by sdl2_gl_overlay_flush */
+void wayland_flush_sub_window(struct wayland_sub_window *sub,
+                             uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+
+void wayland_release_buffer(struct wayland_sub_window *sub,
+                            struct wayland_buffer *buffer);
+
+/* Initialization and cleanup functions */
+struct wayland_console *wayland_console_init(void *parent_console, struct wl_display *display, struct wl_surface *main_surface);
+void wayland_console_destroy(struct wayland_console *console);
+
+#endif /* WAYLAND_OVERLAY_H */

@@ -124,6 +124,68 @@ if sdl.found()
   sdl_ss.add(when: opengl, if_true: files('sdl2-gl.c'))
   sdl_ss.add(when: x11, if_true: files('x_keymap.c'))
   sdl_ss.add(when: gbm, if_true: gbm)
+
+  if wayland.found()
+    wayland_proto_dir = wayland_protocols.get_variable(pkgconfig: 'pkgdatadir')
+
+    proto_sources = []
+    proto_headers = []
+
+    protocols = {
+      'xdg-shell': 'stable/xdg-shell/xdg-shell.xml',
+      'linux-dmabuf-v1': 'stable/linux-dmabuf/linux-dmabuf-v1.xml',
+      'viewporter': 'stable/viewporter/viewporter.xml',
+    }
+
+    foreach name, path : protocols
+      proto_path = join_paths(wayland_proto_dir, path)
+
+      message('Wayland protocol @0@ found at @1@'.format(name, proto_path))
+
+      if not fs.exists(proto_path)
+        error('Protocol file @0@ not found'.format(proto_path))
+      endif
+
+      proto_src = custom_target(
+        '@0@.c'.format(name),
+        input: proto_path,
+        output: '@0@.c'.format(name),
+        command: [
+          wayland_scanner,
+          'private-code',
+          '@INPUT@',
+          '@OUTPUT@'
+        ],
+        install: false,
+        build_by_default: true
+      )
+
+      proto_header = custom_target(
+        '@0@.h'.format(name),
+        input: proto_path,
+        output: '@0@-client.h'.format(name),
+        command: [
+          wayland_scanner,
+          'client-header',
+          '@INPUT@',
+          '@OUTPUT@'
+        ],
+        install: false,
+        build_by_default: true
+      )
+
+      proto_sources += proto_src
+      proto_headers += proto_header
+    endforeach
+
+    sdl_ss.add(proto_sources)
+    sdl_ss.add(wayland_client)
+    sdl_ss.add(files(
+      'wayland-overlay.c',
+    ))
+
+  endif
+
   ui_modules += {'sdl' : sdl_ss}
 endif
 
