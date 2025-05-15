@@ -139,6 +139,7 @@ void sdl2_gl_refresh(DisplayChangeListener *dcl)
         sdl2_gl_render_surface(scon);
     }
     sdl2_clean_invalid_sub_windows(scon);
+    wayland_clean_invalid_sub_windows(scon->wayland_console);
     sdl2_poll_events(scon);
 }
 
@@ -254,6 +255,40 @@ void sdl2_gl_scanout_texture(DisplayChangeListener *dcl,
                          backing_id, false);
 }
 
+static void sdl2_init_wayland_overlay(struct sdl2_console *scon)
+{
+    SDL_SysWMinfo wm_info;
+    struct wl_display *wl_display = NULL;
+    struct wl_surface *wl_surface = NULL;
+
+    if (!scon || !scon->real_window || scon->wayland_console) {
+        return;
+    }
+
+    SDL_VERSION(&wm_info.version);
+    if (!SDL_GetWindowWMInfo(scon->real_window, &wm_info)) {
+        fprintf(stderr, "SDL_GetWindowWMInfo failed: %s\n", SDL_GetError());
+        return;
+    }
+
+    if (wm_info.subsystem != SDL_SYSWM_WAYLAND) {
+        /* Not using Wayland, ignore */
+        return;
+    }
+
+    wl_display = wm_info.info.wl.display;
+    wl_surface = wm_info.info.wl.surface;
+
+    scon->wayland_console = wayland_console_init(scon, wl_display, wl_surface);
+
+    if (!scon->wayland_console) {
+        fprintf(stderr, "Failed to initialize Wayland console\n");
+        return;
+    }
+
+    fprintf(stderr, "Wayland overlay initialized successfully\n");
+}
+
 void sdl2_gl_overlay_dmabuf(DisplayChangeListener *dcl, QemuDmaBuf *dmabuf,
                             uint32_t id)
 {
@@ -321,6 +356,32 @@ void sdl2_gl_overlay_dmabuf(DisplayChangeListener *dcl, QemuDmaBuf *dmabuf,
         sub->y0_top = dmabuf->y0_top;
 
         SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
+    } else if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_WAYLAND) {
+        if (!scon->wayland_console) {
+            sdl2_init_wayland_overlay(scon);
+            if (!scon->wayland_console) {
+                fprintf(stderr, "sdl2_gl_overlay_dmabuf: wayland console not available\n");
+                return;
+            }
+        }
+
+        struct wayland_sub_window *sub = wayland_find_sub_window(scon->wayland_console, id);
+        if (!sub) {
+            wayland_update_sub_window(scon->wayland_console, id,
+                                     dmabuf->x_coord, dmabuf->y_coord,
+                                     dmabuf->width, dmabuf->height,
+                                     0, 0, dmabuf->width, dmabuf->height,
+                                     dmabuf->zpos, dmabuf->alpha);
+            sub = wayland_find_sub_window(scon->wayland_console, id);
+            if (!sub) {
+                fprintf(stderr, "sdl2_gl_overlay_dmabuf: wayland sub-window creation failed\n");
+                return;
+            }
+        }
+
+        wayland_update_dmabuf(sub, dmabuf);
+
+        SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
     } else {
         fprintf(stderr, "sdl2_gl_overlay_dmabuf type %d not supported\n", scon->present_type);
     }
@@ -372,27 +433,31 @@ bool sdl2_gl_has_dmabuf(DisplayChangeListener *dcl)
  * 4. Releasing window grab state to prevent input capture by stale windows
  *
  * Under normal operation, scanout flush and overlay flush are called together,
- * keeping the flush_count at or near zero for active sub-windows. When a 
+ * keeping the flush_count at or near zero for active sub-windows. When a
  * sub-window's flush_count exceeds the timeout threshold, it indicates the
  * overlay has likely become invalid (closed by guest, obscured by mouse cursor,
  * or hidden behind transparent layers).
- * 
+ *
  * During cleanup, it's essential to forcibly release window grab state to
  * prevent the Wayland compositor (like Weston) from losing 'pointer->focus',
  * which could cause input handling issues in the overall desktop environment.
- * 
+ *
  * @param scon Pointer to the main SDL2 console structure
  */
 static void sdl2_gl_subwin_flush_sync(struct sdl2_console *scon){
-    struct sdl2_sub_window *sub;
-    for(sub = scon->sub_windows; sub != NULL; sub=sub->next){
-        sub->flush_count++;
-        if (sub->valid){
-            if (sub->flush_count >= SDL2_GL_OVERLAY_TIMEOUT){
-                sub->valid = false;
-                SDL_SetWindowGrab(scon->real_window, SDL_FALSE);
+    if(scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_SUBWIN){
+        struct sdl2_sub_window *sub;
+        for(sub = scon->sub_windows; sub != NULL; sub=sub->next){
+            sub->flush_count++;
+            if (sub->valid){
+                if (sub->flush_count >= SDL2_GL_OVERLAY_TIMEOUT){
+                    sub->valid = false;
+                    SDL_SetWindowGrab(scon->real_window, SDL_FALSE);
+                }
             }
         }
+    } else if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_WAYLAND) {
+        wayland_flush_sync_sub_window(scon->wayland_console);
     }
 }
 
@@ -482,6 +547,20 @@ void sdl2_gl_overlay_flush(DisplayChangeListener *dcl, uint32_t id,
 
         SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
 
+    } else if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_WAYLAND) {
+        if (!scon->wayland_console) {
+            fprintf(stderr, "sdl2_gl_overlay_flush: wayland console not initialized\n");
+            return;
+        }
+
+        struct wayland_sub_window *sub = wayland_find_sub_window(scon->wayland_console, id);
+        if (!sub) {
+            fprintf(stderr, "sdl2_gl_overlay_flush: wayland sub-window not found for plane %u\n", id);
+            return;
+        }
+
+        sub->flush_count = 0;
+        wayland_flush_sub_window(sub, x, y, w, h);
     } else {
         fprintf(stderr, "sdl2_gl_overlay_flush: type %d not supported\n", scon->present_type);
     }

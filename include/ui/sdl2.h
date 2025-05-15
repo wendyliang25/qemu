@@ -24,6 +24,7 @@
 #include "ui/kbd-state.h"
 #ifdef CONFIG_OPENGL
 # include "ui/egl-helpers.h"
+# include "ui/wayland-overlay.h"
 #endif
 
 #define SDL2_GL_MAX_OVERLAY_NUM    8
@@ -106,6 +107,7 @@ struct sdl2_console {
     egl_overlay_fb guest_overlay_fbs[SDL2_GL_MAX_OVERLAY_NUM];
     bool y0_top;
     bool scanout_mode;
+    struct wayland_console *wayland_console; /* Wayland console for overlay */
 #endif
     enum sdl2_overlay_present_type present_type;
     struct sdl2_sub_window *sub_windows;  /* List of sub-windows */
