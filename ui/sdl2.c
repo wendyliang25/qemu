@@ -695,7 +695,6 @@ struct sdl2_sub_window * sdl2_create_sub_window(struct sdl2_console *parent,
     sub->id = plane_id;
     sub->width = width;
     sub->height = height;
-    
     /* Create borderless, click-through window */
     SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
     SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_ALLOW_LIBDECOR, "0");
@@ -789,7 +788,6 @@ void sdl2_clean_invalid_sub_windows(struct sdl2_console *parent){
             g_free(sub);
         }
     }
-    
     SDL_SetWindowGrab(parent->real_window, SDL_TRUE);
 }
 
@@ -877,7 +875,7 @@ static int sdl2_event_filter(void *userdata, SDL_Event *event)
 {
     int i;
     uint32_t window_id = 0;
-    
+
     switch (event->type) {
     case SDL_MOUSEMOTION:
         window_id = event->motion.windowID;
@@ -902,7 +900,7 @@ static int sdl2_event_filter(void *userdata, SDL_Event *event)
     default:
         return 1;
     }
-    
+
     for (i = 0; i < sdl2_num_outputs; i++) {
         if(sdl2_console[i].real_window == NULL ){
             continue;
@@ -915,12 +913,11 @@ static int sdl2_event_filter(void *userdata, SDL_Event *event)
             for (sub = sdl2_console[i].sub_windows; sub != NULL; sub = sub->next) {
                 if (sub->valid && SDL_GetWindowID(sub->window) == window_id) {
                     sdl2_handle_sub_window_event(&sdl2_console[i], sub, event);
-                    return 0;   
+                    return 0;
                 }
             }
         }
     }
-    
     return 0;
 }
 
@@ -1331,7 +1328,6 @@ static void sdl2_display_init(DisplayState *ds, DisplayOptions *o)
     }
     /* add event filter for sub window */
     SDL_SetEventFilter(sdl2_event_filter, NULL);
-    
     mouse_mode_notifier.notify = sdl_mouse_mode_change;
     qemu_add_mouse_mode_change_notifier(&mouse_mode_notifier);
 
