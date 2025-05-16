@@ -27,7 +27,7 @@
 #include "ui/console.h"
 #include "qemu/queue.h"
 
-#include <drm_fourcc.h>
+#include "standard-headers/drm/drm_fourcc.h"
 
 
 static void registry_global(void *data, struct wl_registry *registry,
