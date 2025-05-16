@@ -98,6 +98,8 @@ static const struct {
     { DRM_FORMAT_XRGB8888, PIXMAN_LE_x8r8g8b8 },
     { DRM_FORMAT_XBGR8888, PIXMAN_LE_x8b8g8r8 },
     { DRM_FORMAT_ABGR8888, PIXMAN_LE_a8b8g8r8 },
+    { DRM_FORMAT_XRGB2101010, PIXMAN_LE_x2r10g10b10 },
+    { DRM_FORMAT_BGRX1010102, PIXMAN_LE_x2b10g10r10 },
 };
 
 pixman_format_code_t qemu_drm_format_to_pixman(uint32_t drm_format)
