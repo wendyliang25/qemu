@@ -120,6 +120,8 @@ void sdl2_window_create(struct sdl2_console *scon)
 
         SDL_SetHint(SDL_HINT_RENDER_DRIVER, driver);
         SDL_SetHint(SDL_HINT_RENDER_BATCHING, "1");
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_RESET_NOTIFICATION,
+                            SDL_GL_CONTEXT_RESET_LOSE_CONTEXT);
     }
     scon->real_renderer = SDL_CreateRenderer(scon->real_window, -1, 0);
 

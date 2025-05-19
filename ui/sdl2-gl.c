@@ -179,6 +179,9 @@ QEMUGLContext sdl2_gl_create_context(DisplayGLCtx *dgc,
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, params->major_ver);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, params->minor_ver);
 
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_RESET_NOTIFICATION,
+                        SDL_GL_CONTEXT_RESET_LOSE_CONTEXT);
+
     ctx = SDL_GL_CreateContext(scon->real_window);
 
     /* If SDL fail to create a GL context and we use the "on" flag,
