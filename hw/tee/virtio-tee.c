@@ -610,7 +610,7 @@ static void virtio_tee_invoke_func(VirtIOTEE *t,
     }
 
     ret = teec_invoke_command(&session, func, op_ptr, &ret_origin);
-    if (ret == TEEC_SUCCESS) {
+    if (ret == TEEC_SUCCESS || ret_origin == TEEC_ORIGIN_TRUSTED_APP) {
         resp.hdr.type = cpu_to_le32(VIRTIO_TEE_RESP_OK_INVOKE_FUNC);
     }
 
