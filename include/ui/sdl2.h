@@ -108,6 +108,7 @@ struct sdl2_console {
     bool y0_top;
     bool scanout_mode;
     struct wayland_console *wayland_console; /* Wayland console for overlay */
+    PFNGLGETGRAPHICSRESETSTATUSEXTPROC glGetGraphicsResetStatus;
 #endif
     enum sdl2_overlay_present_type present_type;
     struct sdl2_sub_window *sub_windows;  /* List of sub-windows */

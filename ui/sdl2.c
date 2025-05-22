@@ -127,6 +127,13 @@ void sdl2_window_create(struct sdl2_console *scon)
 
     if (scon->opengl) {
         scon->winctx = SDL_GL_CreateContext(scon->real_window);
+
+        if (SDL_GL_ExtensionSupported("GL_KHR_robustness"))
+            scon->glGetGraphicsResetStatus = SDL_GL_GetProcAddress("glGetGraphicsResetStatusKHR");
+        else if (SDL_GL_ExtensionSupported("GL_ARB_robustness"))
+            scon->glGetGraphicsResetStatus = SDL_GL_GetProcAddress("glGetGraphicsResetStatusARB");
+        else if (SDL_GL_ExtensionSupported("GL_EXT_robustness"))
+            scon->glGetGraphicsResetStatus = SDL_GL_GetProcAddress("glGetGraphicsResetStatusEXT");
     }
 
     qemu_egl_display = eglGetCurrentDisplay();
