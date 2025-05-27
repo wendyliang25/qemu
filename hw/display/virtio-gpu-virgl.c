@@ -687,7 +687,7 @@ static void virgl_cmd_resource_create_blob(VirtIOGPU *g,
         cmd->error = VIRTIO_GPU_RESP_ERR_UNSPEC;
     }
 
-    vres->res.protected = virgl_renderer_resource_is_protected(cblob.resource_id);
+    vres->res.protected = virgl_renderer_resource_is_protected(cblob.resource_id, cmd->cmd_hdr.ctx_id);
 }
 
 static void virgl_free_mr(void *obj)
