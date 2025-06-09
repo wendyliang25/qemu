@@ -482,3 +482,20 @@ void wayland_clean_invalid_sub_windows(struct wayland_console *parent)
         }
     }
 }
+
+void wayland_poll_events(struct wayland_console *parent)
+{
+    if (!parent || !parent->display) {
+        fprintf(stderr, "Invalid Wayland console or display\n");
+        return;
+    }
+    struct wayland_sub_window *sub;
+    QLIST_FOREACH(sub, &parent->sub_windows, next) {
+        if (!sub->event_queue) {
+            if(wl_display_dispatch_queue_pending(parent->display, sub->event_queue) < 0) {
+                fprintf(stderr, "Failed to dispatch Wayland display queue\n");
+                return;
+            }
+        }
+    }
+}

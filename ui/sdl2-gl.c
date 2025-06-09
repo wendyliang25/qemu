@@ -148,7 +148,9 @@ void sdl2_gl_refresh(DisplayChangeListener *dcl)
     }
     sdl2_clean_invalid_sub_windows(scon);
     wayland_clean_invalid_sub_windows(scon->wayland_console);
+
     sdl2_poll_events(scon);
+    wayland_poll_events(scon->wayland_console);
 }
 
 void sdl2_gl_redraw(struct sdl2_console *scon)

@@ -113,6 +113,8 @@ void wayland_flush_sub_window(struct wayland_sub_window *sub,
 void wayland_release_buffer(struct wayland_sub_window *sub,
                             struct wayland_buffer *buffer);
 
+void wayland_poll_events(struct wayland_console *console);
+
 /* Initialization and cleanup functions */
 struct wayland_console *wayland_console_init(void *parent_console, struct wl_display *display, struct wl_surface *main_surface);
 void wayland_console_destroy(struct wayland_console *console);
