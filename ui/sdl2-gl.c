@@ -477,7 +477,7 @@ void sdl2_gl_scanout_flush(DisplayChangeListener *dcl,
         return;
     }
 
-    if (data && data->current_frame_state != scon->guest_fb.dmabuf->protected)
+    if (data && scon->guest_fb.dmabuf && data->current_frame_state != scon->guest_fb.dmabuf->protected)
         data->frame_need_protected = scon->guest_fb.dmabuf->protected;
 
     /* Drawing is synchronous here, so no need to use graphic_hw_gl_block. */
