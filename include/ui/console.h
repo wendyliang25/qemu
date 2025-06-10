@@ -295,7 +295,8 @@ typedef struct DisplayChangeListenerOps {
 
     /* optional */
     void (*dpy_gl_update_overlay)(DisplayChangeListener *dcl,uint32_t id,
-                                  uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+                                  uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                                  uint64_t fence_id);
     /* optional */
     void (*dpy_gl_set_hdcp)(DisplayChangeListener *dcl, uint32_t type, uint32_t mode);
 
@@ -399,7 +400,8 @@ void dpy_gl_release_dmabuf(QemuConsole *con,
 void dpy_gl_update(QemuConsole *con,
                    uint32_t x, uint32_t y, uint32_t w, uint32_t h);
 void dpy_gl_update_overlay(QemuConsole *con, uint32_t id,
-                           uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+                           uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                           uint64_t fence_id);
 void dpy_gl_set_hdcp(QemuConsole *con, uint32_t type, uint32_t mode);
 void dpy_set_dpms(QemuConsole *con, qdpms_enum level);
 QEMUGLContext dpy_gl_ctx_create(QemuConsole *con,

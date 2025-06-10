@@ -2178,7 +2178,8 @@ void dpy_gl_update(QemuConsole *con,
 }
 
 void dpy_gl_update_overlay(QemuConsole *con, uint32_t id,
-                           uint32_t x, uint32_t y, uint32_t w, uint32_t h)
+                           uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                           uint64_t fence_id)
 {
     DisplayState *s = con->ds;
     DisplayChangeListener *dcl;
@@ -2191,7 +2192,8 @@ void dpy_gl_update_overlay(QemuConsole *con, uint32_t id,
             continue;
         }
         if (dcl->ops->dpy_gl_update_overlay) {
-            dcl->ops->dpy_gl_update_overlay(dcl, id, x, y, w, h);
+            dcl->ops->dpy_gl_update_overlay(dcl, id, x, y, w, h,
+                                            fence_id);
         }
     }
     graphic_hw_gl_block(con, false);

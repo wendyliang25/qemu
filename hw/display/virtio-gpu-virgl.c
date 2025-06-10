@@ -253,7 +253,7 @@ static void virtio_gpu_rect_update(VirtIOGPU *g, int idx, int x, int y,
 
 static void
 virgl_cmd_resource_flush_overlay(VirtIOGPU *g, struct virgl_gpu_resource *vres,
-                                 struct virtio_gpu_resource_flush *rf)
+                                 struct virtio_gpu_resource_flush *rf, uint64_t fence_id)
 {
     QemuConsole *con = g->parent_obj.scanout[vres->scanout_id].con;
 
@@ -261,7 +261,7 @@ virgl_cmd_resource_flush_overlay(VirtIOGPU *g, struct virgl_gpu_resource *vres,
         return;
 
     dpy_gl_update_overlay(con, vres->overlay_id, rf->r.x, rf->r.y, rf->r.width,
-                          rf->r.height);
+                          rf->r.height, fence_id);
 }
 
 static void virgl_cmd_resource_flush(VirtIOGPU *g,
@@ -284,8 +284,9 @@ static void virgl_cmd_resource_flush(VirtIOGPU *g,
         return;
     }
 
-    if (vres->type == VIRGL_GPU_RESOURCE_TYPE_OVERLAY)
-        return virgl_cmd_resource_flush_overlay(g, vres, &rf);
+    if (vres->type == VIRGL_GPU_RESOURCE_TYPE_OVERLAY){
+        return virgl_cmd_resource_flush_overlay(g, vres, &rf, cmd->cmd_hdr.fence_id);
+    }
 
     for (i = 0; i < g->parent_obj.conf.max_outputs; i++) {
         if (g->parent_obj.scanout[i].resource_id != rf.resource_id) {
