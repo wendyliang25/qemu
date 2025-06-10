@@ -75,6 +75,18 @@ static int virtio_vga_base_get_flags(void *opaque)
     return g->hw_ops->get_flags(g);
 }
 
+static void virtio_vga_flush_done(void *opaque, uint64_t fence_id)
+{
+    VirtIOVGABase *vvga = opaque;
+    VirtIOGPUBase *g = vvga->vgpu;
+
+    if (g->hw_ops->gl_flush_done) {
+        g->hw_ops->gl_flush_done(g, fence_id);
+    } else {
+        fprintf(stderr, "virtio_vga_flush_done: no gl_flush_done handler\n");
+    }
+}
+
 static const GraphicHwOps virtio_vga_base_ops = {
     .get_flags = virtio_vga_base_get_flags,
     .invalidate = virtio_vga_base_invalidate_display,
@@ -82,6 +94,7 @@ static const GraphicHwOps virtio_vga_base_ops = {
     .text_update = virtio_vga_base_text_update,
     .ui_info = virtio_vga_base_ui_info,
     .gl_block = virtio_vga_base_gl_block,
+    .gl_flush_done = virtio_vga_flush_done,
 };
 
 static const VMStateDescription vmstate_virtio_vga_base = {

@@ -159,6 +159,18 @@ virtio_gpu_get_flags(void *opaque)
     return flags;
 }
 
+static void virtio_gpu_flush_done(void *opaque, uint64_t fence_id)
+{
+    VirtIOGPUBase *g = opaque;
+    VirtIOGPUBaseClass *vgc = VIRTIO_GPU_BASE_GET_CLASS(g);
+
+    if (vgc->gl_flush_done) {
+        vgc->gl_flush_done(g, fence_id);
+    } else {
+        fprintf(stderr, "virtio_gpu_flush_done: no gl_flush_done handler\n");
+    }
+}
+
 static const GraphicHwOps virtio_gpu_ops = {
     .get_flags = virtio_gpu_get_flags,
     .invalidate = virtio_gpu_invalidate_display,
@@ -166,6 +178,7 @@ static const GraphicHwOps virtio_gpu_ops = {
     .text_update = virtio_gpu_text_update,
     .ui_info = virtio_gpu_ui_info,
     .gl_block = virtio_gpu_gl_block,
+    .gl_flush_done = virtio_gpu_flush_done,
 };
 
 bool
