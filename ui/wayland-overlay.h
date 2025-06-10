@@ -26,7 +26,10 @@ struct wayland_console;
 
 struct wayland_sub_window {
     struct wl_surface *surface;
+    struct wl_surface *surface_proxy;
     struct wl_subsurface *subsurface;
+    struct wl_subsurface *subsurface_proxy;
+    struct wl_event_queue *event_queue;
 
     uint32_t id;
     /* Position relative to parent window */
@@ -53,6 +56,7 @@ struct wayland_sub_window {
     bool buffer_queued;
 
     struct wl_callback *frame_callback;
+    struct wl_callback *frame_callback_proxy;
     bool framing;
 
     QLIST_ENTRY(wayland_sub_window) next;

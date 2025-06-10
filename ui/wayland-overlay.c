@@ -224,17 +224,19 @@ static void commit_buffer(struct wayland_sub_window *sub)
             if (buf->wl_buffer) {
                 wl_surface_attach(sub->surface, buf->wl_buffer, 0, 0);
                 wl_surface_damage_buffer(sub->surface, 0, 0, buf->width, buf->height);
+                
+                sub->frame_callback = wl_surface_frame(sub->surface);
+                wl_callback_add_listener(sub->frame_callback, &frame_listener, sub);
 
-                wl_subsurface_set_position(sub->subsurface, sub->x, sub->y);
+                wl_surface_commit(sub->surface);
+
+                sub->framing = true;
             }
         }
         sub->buffer_queued = false;
+    } else {
+        fprintf(stderr, "[wayland] commit_buffer: buffer not queued for fd %d\n", sub->dmabuf->fd);
     }
-    sub->frame_callback = wl_surface_frame(sub->surface);
-    wl_callback_add_listener(sub->frame_callback, &frame_listener, sub);
-
-    wl_surface_commit(sub->surface);
-    wl_display_flush(sub->wl_console->display);
 }
 
 
@@ -312,19 +314,29 @@ static bool wayland_create_sub_window_resources(struct wayland_console *parent,
         fprintf(stderr, "Failed to create Wayland surface\n");
         return false;
     }
-
-    sub->subsurface = wl_subcompositor_get_subsurface(
-        parent->subcompositor, sub->surface, parent->main_surface);
-    if (!sub->subsurface) {
-        fprintf(stderr, "Failed to create Wayland subsurface\n");
-        wl_surface_destroy(sub->surface);
-        sub->surface = NULL;
+    sub->surface_proxy = wl_proxy_create_wrapper(sub->surface);
+    if (!sub->surface_proxy) {
+        fprintf(stderr, "Failed to create Wayland surface proxy\n");
         return false;
     }
+    wl_proxy_set_queue((struct wl_proxy *)sub->surface_proxy, sub->event_queue);
 
-    wl_subsurface_set_position(sub->subsurface, sub->x, sub->y);
-    wl_subsurface_set_desync(sub->subsurface);
 
+    sub->subsurface = wl_subcompositor_get_subsurface(
+        parent->subcompositor, sub->surface_proxy, parent->main_surface);
+    if (!sub->subsurface) {
+        fprintf(stderr, "Failed to create Wayland subsurface\n");
+        return false;
+    }
+    sub->subsurface_proxy = wl_proxy_create_wrapper(sub->subsurface);
+    if (!sub->subsurface_proxy) {
+        fprintf(stderr, "Failed to create Wayland subsurface proxy\n");
+        return false;
+    }
+    wl_proxy_set_queue((struct wl_proxy *)sub->subsurface_proxy, sub->event_queue);
+
+    wl_subsurface_set_position(sub->subsurface_proxy, sub->x, sub->y);
+    wl_subsurface_set_desync(sub->subsurface_proxy);
 
     return true;
 }
@@ -335,11 +347,29 @@ static void wayland_release_sub_window_resources(struct wayland_sub_window *sub)
         return;
     }
 
+    if (sub->frame_callback) {
+        wl_callback_destroy(sub->frame_callback);
+        sub->frame_callback = NULL;
+    }
+
+    if (sub->event_queue) {
+        wl_event_queue_destroy(sub->event_queue);
+        sub->event_queue = NULL;
+    }
+
+    if (sub->subsurface_proxy) {
+        wl_proxy_wrapper_destroy(sub->subsurface_proxy);
+        sub->subsurface_proxy = NULL;
+    }
     if (sub->subsurface) {
         wl_subsurface_destroy(sub->subsurface);
         sub->subsurface = NULL;
     }
 
+    if (sub->surface_proxy) {
+        wl_proxy_wrapper_destroy(sub->surface_proxy);
+        sub->surface_proxy = NULL;
+    }
     if (sub->surface) {
         wl_surface_destroy(sub->surface);
         sub->surface = NULL;
@@ -370,9 +400,14 @@ struct wayland_sub_window *wayland_create_sub_window(struct wayland_console *par
     sub->src_height = height;
     sub->valid = true;
     sub->flush_count = 0;
+    sub->framing = false;
     sub->wl_console = parent;
+    sub->event_queue =
+        wl_display_create_queue_with_name(parent->display,
+                                          g_strdup_printf("sub_window_%u", plane_id));
 
     if (!wayland_create_sub_window_resources(parent, sub)) {
+        wayland_release_sub_window_resources(sub);
         g_free(sub);
         return NULL;
     }
@@ -380,7 +415,7 @@ struct wayland_sub_window *wayland_create_sub_window(struct wayland_console *par
     QLIST_INSERT_HEAD(&parent->sub_windows, sub, next);
     parent->num_sub_windows++;
 
-    wl_surface_commit(sub->surface);
+    wl_surface_commit(sub->surface_proxy);
 
     return sub;
 }
