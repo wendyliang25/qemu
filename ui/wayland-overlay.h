@@ -58,6 +58,7 @@ struct wayland_sub_window {
     struct wl_callback *frame_callback;
     struct wl_callback *frame_callback_proxy;
     bool framing;
+    uint64_t fence;
 
     QLIST_ENTRY(wayland_sub_window) next;
 
@@ -108,7 +109,8 @@ void wayland_update_dmabuf(struct wayland_sub_window *sub,
                            QemuDmaBuf *dmabuf);
 /* Used by sdl2_gl_overlay_flush */
 void wayland_flush_sub_window(struct wayland_sub_window *sub,
-                             uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+                             uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                             uint64_t fence_id);
 
 void wayland_release_buffer(struct wayland_sub_window *sub,
                             struct wayland_buffer *buffer);

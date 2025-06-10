@@ -27,6 +27,8 @@
 #include "ui/console.h"
 #include "qemu/queue.h"
 
+#include "ui/sdl2.h"
+
 #include "standard-headers/drm/drm_fourcc.h"
 
 
@@ -49,7 +51,7 @@ static const struct wl_registry_listener registry_listener = {
     .global_remove = NULL,
 };
 
-static void commit_buffer(struct wayland_sub_window *sub);
+static void commit_buffer(struct wayland_sub_window *sub, uint64_t fence_id);
 
 static void frame_handle_done(void *data, struct wl_callback *cb, uint32_t time)
 {
@@ -57,7 +59,11 @@ static void frame_handle_done(void *data, struct wl_callback *cb, uint32_t time)
     if (sub->valid) {
         wl_callback_destroy(sub->frame_callback);
         sub->frame_callback = NULL;
-        commit_buffer(sub);
+        sub->framing = false;
+
+        struct sdl2_console *sdlc = sub->wl_console->parent_console;
+        graphic_hw_gl_flush_done(sdlc->dcl.con, sub->fence);
+        sub->fence = 0;
     }
 }
 
@@ -216,7 +222,7 @@ void wayland_update_dmabuf(struct wayland_sub_window *sub,
     sub->buffer_queued = true;
 }
 
-static void commit_buffer(struct wayland_sub_window *sub)
+static void commit_buffer(struct wayland_sub_window *sub, uint64_t fence_id)
 {
     if (sub->buffer_queued) {
         struct wayland_buffer *buf = wayland_dmabuf_to_buffer(sub);
@@ -224,7 +230,8 @@ static void commit_buffer(struct wayland_sub_window *sub)
             if (buf->wl_buffer) {
                 wl_surface_attach(sub->surface, buf->wl_buffer, 0, 0);
                 wl_surface_damage_buffer(sub->surface, 0, 0, buf->width, buf->height);
-                
+
+                sub->fence = fence_id;
                 sub->frame_callback = wl_surface_frame(sub->surface);
                 wl_callback_add_listener(sub->frame_callback, &frame_listener, sub);
 
@@ -241,7 +248,8 @@ static void commit_buffer(struct wayland_sub_window *sub)
 
 
 void wayland_flush_sub_window(struct wayland_sub_window *sub,
-                              uint32_t x, uint32_t y, uint32_t w, uint32_t h)
+                              uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                              uint64_t fence_id)
 {
     if (!wayland_is_valid_subwindow(sub)) {
         return;
@@ -253,7 +261,7 @@ void wayland_flush_sub_window(struct wayland_sub_window *sub,
         /* Then weston handle the rest framing */
         /* See: frame_handle_done */
         if(!sub->framing) {
-            commit_buffer(sub);
+            commit_buffer(sub, fence_id);
             sub->framing = true;
         }
     }
@@ -348,6 +356,11 @@ static void wayland_release_sub_window_resources(struct wayland_sub_window *sub)
     }
 
     if (sub->frame_callback) {
+        if (sub->fence) {
+            struct sdl2_console *sdlc = sub->wl_console->parent_console;
+            graphic_hw_gl_flush_done(sdlc->dcl.con, sub->fence);
+            sub->fence = 0;
+        }
         wl_callback_destroy(sub->frame_callback);
         sub->frame_callback = NULL;
     }

@@ -527,7 +527,8 @@ reflush:
 }
 
 void sdl2_gl_overlay_flush(DisplayChangeListener *dcl, uint32_t id,
-                           uint32_t x, uint32_t y, uint32_t w, uint32_t h)
+                           uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                           uint64_t fence_id)
 {
     struct sdl2_console *scon = container_of(dcl, struct sdl2_console, dcl);
     assert(scon->opengl);
@@ -599,7 +600,7 @@ void sdl2_gl_overlay_flush(DisplayChangeListener *dcl, uint32_t id,
         }
 
         sub->flush_count = 0;
-        wayland_flush_sub_window(sub, x, y, w, h);
+        wayland_flush_sub_window(sub, x, y, w, h, fence_id);
     } else {
         fprintf(stderr, "sdl2_gl_overlay_flush: type %d not supported\n", scon->present_type);
     }
