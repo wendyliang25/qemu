@@ -55,6 +55,23 @@ static void virtio_gpu_gl_flushed(VirtIOGPUBase *b)
     virtio_gpu_process_cmdq(g);
 }
 
+static void virtio_gpu_gl_flush_done(VirtIOGPUBase *b,
+                                     uint64_t fence_id)
+{
+    VirtIOGPU *g = VIRTIO_GPU(b);
+
+    struct virtio_gpu_ctrl_command *cmd, *tmp;
+    QTAILQ_FOREACH_SAFE(cmd, &g->flush_fenceq, next, tmp) {
+        if (cmd->cmd_hdr.fence_id <= fence_id) {
+            virtio_gpu_ctrl_response_nodata(g, cmd, VIRTIO_GPU_RESP_OK_NODATA);
+            QTAILQ_REMOVE(&g->flush_fenceq, cmd, next);
+            g_free(cmd);
+            g->inflight_flush--;
+            break;
+        }
+    }
+}
+
 static void virtio_gpu_gl_handle_ctrl(VirtIODevice *vdev, VirtQueue *vq)
 {
     VirtIOGPU *g = VIRTIO_GPU(vdev);
@@ -164,6 +181,7 @@ static void virtio_gpu_gl_class_init(ObjectClass *klass, void *data)
     VirtIOGPUClass *vgc = VIRTIO_GPU_CLASS(klass);
 
     vbc->gl_flushed = virtio_gpu_gl_flushed;
+    vbc->gl_flush_done = virtio_gpu_gl_flush_done;
     vgc->handle_ctrl = virtio_gpu_gl_handle_ctrl;
     vgc->process_cmd = virtio_gpu_virgl_process_cmd;
     vgc->update_cursor_data = virtio_gpu_gl_update_cursor_data;

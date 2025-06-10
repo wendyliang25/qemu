@@ -1094,6 +1094,24 @@ static void virtio_gpu_handle_cursor_cb(VirtIODevice *vdev, VirtQueue *vq)
     qemu_bh_schedule(g->cursor_bh);
 }
 
+static inline bool cmd_in_flush_queue(VirtIOGPU *g, struct virtio_gpu_ctrl_command *cmd) {
+    struct virtio_gpu_ctrl_command *c;
+    QTAILQ_FOREACH(c, &g->flush_fenceq, next) {
+        if (c == cmd) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void virtio_gpu_flush_fence_enqueue(VirtIOGPU *g, struct virtio_gpu_ctrl_command *cmd) {
+    if (cmd_in_flush_queue(g, cmd)) {
+        return;
+    }
+    QTAILQ_INSERT_TAIL(&g->flush_fenceq, cmd, next);
+    g->inflight_flush++;
+}
+
 void virtio_gpu_process_cmdq(VirtIOGPU *g)
 {
     struct virtio_gpu_ctrl_command *cmd;
@@ -1119,13 +1137,16 @@ void virtio_gpu_process_cmdq(VirtIOGPU *g)
         }
 
         if (!cmd->finished) {
-            QTAILQ_INSERT_TAIL(&g->fenceq, cmd, next);
-            g->inflight++;
-            if (virtio_gpu_stats_enabled(g->parent_obj.conf)) {
-                if (g->stats.max_inflight < g->inflight) {
-                    g->stats.max_inflight = g->inflight;
+            if (cmd->cmd_hdr.type == VIRTIO_GPU_CMD_RESOURCE_FLUSH) {
+                virtio_gpu_flush_fence_enqueue(g, cmd);
+            } else {
+                QTAILQ_INSERT_TAIL(&g->fenceq, cmd, next);
+                g->inflight++;
+                if (virtio_gpu_stats_enabled(g->parent_obj.conf)) {
+                    if (g->stats.max_inflight < g->inflight) {
+                        g->stats.max_inflight = g->inflight;
+                    }
                 }
-                fprintf(stderr, "inflight: %3d (+)\r", g->inflight);
             }
         } else {
             g_free(cmd);
@@ -1571,6 +1592,7 @@ void virtio_gpu_device_realize(DeviceState *qdev, Error **errp)
     QTAILQ_INIT(&g->reslist);
     QTAILQ_INIT(&g->cmdq);
     QTAILQ_INIT(&g->fenceq);
+    QTAILQ_INIT(&g->flush_fenceq);
 
     g->resource_uuids = g_hash_table_new_full(g_int_hash, g_int_equal, NULL, g_free);
 }
@@ -1632,6 +1654,13 @@ void virtio_gpu_reset(VirtIODevice *vdev)
         QTAILQ_REMOVE(&g->fenceq, cmd, next);
         g->inflight--;
         g_free(cmd);
+    }
+
+    while (!QTAILQ_EMPTY(&g->flush_fenceq)) {
+        cmd = QTAILQ_FIRST(&g->flush_fenceq);
+        QTAILQ_REMOVE(&g->flush_fenceq, cmd, next);
+        g_free(cmd);
+        g->inflight_flush--;
     }
 
     for (i = 0; i < g->parent_obj.conf.max_outputs; i++) {

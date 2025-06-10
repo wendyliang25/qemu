@@ -184,6 +184,7 @@ struct VirtIOGPUBaseClass {
     VirtioDeviceClass parent;
 
     void (*gl_flushed)(VirtIOGPUBase *g);
+    void (*gl_flush_done)(VirtIOGPUBase *g, uint64_t fence_id);
 };
 
 #define VIRTIO_GPU_BASE_PROPERTIES(_state, _conf)                       \
@@ -222,6 +223,9 @@ struct VirtIOGPU {
     QTAILQ_HEAD(, virtio_gpu_simple_resource) reslist;
     QTAILQ_HEAD(, virtio_gpu_ctrl_command) cmdq;
     QTAILQ_HEAD(, virtio_gpu_ctrl_command) fenceq;
+    QTAILQ_HEAD(, virtio_gpu_ctrl_command) flush_fenceq;
+
+    int inflight_flush;
 
     uint64_t hostmem;
 
