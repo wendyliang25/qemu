@@ -56,6 +56,10 @@ virtio_gpu_update_cursor(uint32_t scanout, uint32_t x, uint32_t y, const char *t
 virtio_gpu_fence_ctrl(uint64_t fence, uint32_t type) "fence 0x%" PRIx64 ", type 0x%x"
 virtio_gpu_fence_resp(uint64_t fence) "fence 0x%" PRIx64
 
+# virtio-gpu-gl.c
+virtio_gpu_gl_flush_done(uint64_t fence_id) "fence_id=0x%" PRIx64
+virtio_gpu_gl_flush_done_fence_found(uint64_t fence_id, int inflight_flush) "fence_id=0x%" PRIx64 " inflight_flush=%d"
+
 # qxl.c
 disable qxl_io_write_vga(int qid, const char *mode, uint32_t addr, uint32_t val) "%d %s addr=%u val=%u"
 qxl_create_guest_primary(int qid, uint32_t width, uint32_t height, uint64_t mem, uint32_t format, uint32_t position) "%d %ux%u mem=0x%" PRIx64 " %u,%u"
