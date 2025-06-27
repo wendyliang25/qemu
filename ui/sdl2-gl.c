@@ -31,6 +31,14 @@
 #include "ui/input.h"
 #include "ui/sdl2.h"
 
+#ifdef CONFIG_VIRGL
+#include <virglrenderer.h>
+#endif
+
+static int sdl2_gl_recovery(struct sdl2_console *scon, uint32_t x, uint32_t y,
+                            uint32_t w, uint32_t h);
+static int sdl2_gl_check_reset_status(struct sdl2_console *scon);
+
 static int sdl2_gl_find_overlay_by_id(struct sdl2_console *scon, uint32_t id)
 {
     egl_overlay_fb *ov;
@@ -398,6 +406,15 @@ void sdl2_gl_scanout_dmabuf(DisplayChangeListener *dcl,
     assert(scon->opengl);
     SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
 
+    if (sdl2_gl_check_reset_status(scon)) {
+        if(sdl2_gl_recovery(scon, dmabuf->x, dmabuf->y, dmabuf->width, dmabuf->height)) {
+            fprintf(stderr, "sdl2_gl_scanout_dmabuf: GPU recovery failed!\n");
+            return;
+        } else {
+            fprintf(stderr, "sdl2_gl_scanout_dmabuf: GPU recovery succeeded\n");
+        }
+    }
+
     egl_dmabuf_import_texture(dmabuf);
     if (!dmabuf->texture) {
         fprintf(stderr, "sdl2_gl_scanout_dmabuf failed fd=%d\n", dmabuf->fd);
@@ -483,6 +500,7 @@ void sdl2_gl_scanout_flush(DisplayChangeListener *dcl,
     if (data && scon->guest_fb.dmabuf && data->current_frame_state != scon->guest_fb.dmabuf->protected)
         data->frame_need_protected = scon->guest_fb.dmabuf->protected;
 
+reflush:
     /* Drawing is synchronous here, so no need to use graphic_hw_gl_block. */
     SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
 
@@ -491,6 +509,17 @@ void sdl2_gl_scanout_flush(DisplayChangeListener *dcl,
     egl_fb_blit(&scon->win_fb, &scon->guest_fb, !scon->y0_top);
 
     SDL_GL_SwapWindow(scon->real_window);
+
+    if (sdl2_gl_check_reset_status(scon)) {
+        if(!sdl2_gl_recovery(scon, x, y, w, h)) {
+            fprintf(stderr, "sdl2_gl_scanout_flush: GPU recovery succeeded\n");
+            goto reflush;
+        }
+        else {
+            fprintf(stderr, "sdl2_gl_scanout_flush: GPU recovery failed\n");
+            return;
+        }
+    }
 
     sdl2_gl_subwin_flush_sync(scon);
 }
@@ -586,4 +615,61 @@ void sdl2_gl_set_hdcp(DisplayChangeListener *dcl, uint32_t type, uint32_t mode)
     else
         SDL_SetWindowProtectedType(scon->real_window, type);
 #endif
+}
+
+static int sdl2_gl_check_reset_status(struct sdl2_console *scon)
+{
+    bool has_reset = false;
+    int i = 0;
+
+    if (!scon->glGetGraphicsResetStatus)
+        return 0;
+
+    /* Assume GPU reset should be finished within 50s */
+    for (i = 0; i < 1000000; i++) {
+        unsigned status;
+
+        status = scon->glGetGraphicsResetStatus();
+        if (status == GL_NO_ERROR)
+            break;
+
+        has_reset = true;
+        usleep(50);
+    }
+    if (!has_reset)
+        return 0;
+
+    /* if GPU reset is failed, nothing we can do */
+    assert(i < 1000000);
+
+    return -EAGAIN;
+}
+
+static int sdl2_gl_recovery(struct sdl2_console *scon, uint32_t x, uint32_t y,
+                            uint32_t w, uint32_t h)
+{
+    /* 1, Destroy the current contexts and related resources */
+#ifdef CONFIG_VIRGL
+    virgl_renderer_destroy_ctx0();
+#endif
+    SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
+    surface_gl_destroy_texture(scon->gls, scon->surface);
+    qemu_gl_fini_shader(scon->gls);
+    sdl2_window_destroy(scon);
+
+    /* 2, Recreate the contexs and the resources */
+    sdl2_window_create(scon);
+    scon->gls = qemu_gl_init_shader();
+    if (!scon->gls)
+        return -ENOMEM;
+    surface_gl_create_texture(scon->gls, scon->surface);
+    sdl2_window_show(scon);
+    SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
+#ifdef CONFIG_VIRGL
+    if (virgl_renderer_restore_ctx0())
+        return -EINVAL;
+#endif
+    surface_gl_update_texture(scon->gls, scon->surface, x, y, w, h);
+
+    return 0;
 }

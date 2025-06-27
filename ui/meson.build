@@ -122,6 +122,15 @@ if sdl.found()
     'sdl2.c',
   ))
   sdl_ss.add(when: opengl, if_true: files('sdl2-gl.c'))
+
+  if virgl.found()
+    sdl_ss.add(when: opengl, if_true: virgl)
+    virgl_def = declare_dependency(
+    compile_args: '-DCONFIG_VIRGL',
+    )
+    sdl_ss.add(when: opengl, if_true: virgl_def)
+  endif
+
   sdl_ss.add(when: x11, if_true: files('x_keymap.c'))
   sdl_ss.add(when: gbm, if_true: gbm)
 
