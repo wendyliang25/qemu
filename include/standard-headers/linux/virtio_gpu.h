@@ -475,6 +475,7 @@ struct virtio_gpu_set_overlay_blob {
 	__le32 format;
 	__le32 alpha;
 	__le32 zpos;
+	__le32 num_planes;
 	__le32 x_coord;
 	__le32 y_coord;
 	__le32 strides[4];
