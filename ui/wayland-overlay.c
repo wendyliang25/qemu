@@ -176,6 +176,8 @@ static inline bool wayland_is_valid_subwindow(struct wayland_sub_window *sub)
 
 static struct wayland_buffer * wayland_dmabuf_to_buffer(struct wayland_sub_window *sub)
 {
+    int i;
+
     if (!sub->dmabuf || !sub->wl_console->dmabuf_manager) {
         fprintf(stderr, "Invalid parameters for wayland_dmabuf_to_buffer\n");
         return NULL;
@@ -200,10 +202,15 @@ static struct wayland_buffer * wayland_dmabuf_to_buffer(struct wayland_sub_windo
         g_free(newbuf);
         return NULL;
     }
-    zwp_linux_buffer_params_v1_add(params, dmabuf->fd, 0, 0,
-                                    dmabuf->stride,
-                                    (uint32_t)(dmabuf->modifier >> 32),
-                                    (uint32_t)(dmabuf->modifier & 0xFFFFFFFF));
+
+    for (i = 0; i < dmabuf->num_planes; i++) {
+        zwp_linux_buffer_params_v1_add(params, dmabuf->fd,
+                                       i, /* plane_idx */
+                                       dmabuf->offsets[i], /* plane offset */
+                                       dmabuf->strides[i], /* plane stride */
+                                       (uint32_t)(dmabuf->modifier >> 32),
+                                       (uint32_t)(dmabuf->modifier & 0xFFFFFFFF));
+    }
     newbuf->wl_buffer = zwp_linux_buffer_params_v1_create_immed(
                                 params, dmabuf->width, dmabuf->height, dmabuf->fourcc, 0);
     zwp_linux_buffer_params_v1_destroy(params);
