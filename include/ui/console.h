@@ -200,6 +200,10 @@ typedef struct QemuDmaBuf {
     /* The position inside the scanout buffer */
     uint32_t  x_coord;
     uint32_t  y_coord;
+    /* For multiple planes format support */
+    uint32_t  strides[4];
+    uint32_t  offsets[4];
+    uint32_t  num_planes;
 } QemuDmaBuf;
 
 enum display_scanout {

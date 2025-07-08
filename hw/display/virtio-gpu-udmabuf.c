@@ -193,6 +193,7 @@ static VGPUDMABuf
                           struct virtio_gpu_rect *r)
 {
     VGPUDMABuf *dmabuf;
+    int i;
 
     if (res->dmabuf_fd < 0) {
         return NULL;
@@ -212,6 +213,12 @@ static VGPUDMABuf
     dmabuf->buf.draw_submitted = false;
     dmabuf->scanout_id = scanout_id;
     dmabuf->buf.protected = res->protected;
+
+    dmabuf->buf.num_planes = res->num_planes;
+    for (i = 0; i < res->num_planes; i++) {
+        dmabuf->buf.strides[i] = res->strides[i];
+        dmabuf->buf.offsets[i] = res->offsets[i];
+    }
 
     /* Extra props for overlay buffer */
     if (type == VIRGL_GPU_RESOURCE_TYPE_OVERLAY) {

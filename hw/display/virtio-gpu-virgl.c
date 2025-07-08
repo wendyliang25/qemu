@@ -941,6 +941,7 @@ static void virgl_cmd_set_overlay_blob(VirtIOGPU *g,
     struct virgl_renderer_resource_info info;
     uint64_t fbend;
     int transient_fd = 0;
+    int i;
 
     VIRTIO_GPU_FILL_CMD(so);
     virtio_gpu_overlay_blob_bswap(&so);
@@ -992,6 +993,11 @@ static void virgl_cmd_set_overlay_blob(VirtIOGPU *g,
     vres->res.alpha = so.alpha;
     vres->res.x_coord = so.x_coord;
     vres->res.y_coord = so.y_coord;
+    vres->res.num_planes = so.num_planes;
+    for (i = 0; i < so.num_planes; i++) {
+        vres->res.strides[i] = so.strides[i];
+        vres->res.offsets[i] = so.offsets[i];
+    }
 
     if (virgl_renderer_resource_get_info(so.resource_id, &info)) {
         qemu_log_mask(LOG_GUEST_ERROR,
