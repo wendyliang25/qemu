@@ -2,9 +2,9 @@
 #define WAYLAND_OVERLAY_H
 
 #include <wayland-client.h>
-#include "xdg-shell-client.h"
-#include "linux-dmabuf-v1-client.h"
-#include "viewporter-client.h"
+#include "ui/xdg-shell-client.h"
+#include "ui/linux-dmabuf-v1-client.h"
+#include "ui/viewporter-client.h"
 
 #include "ui/console.h"
 #include "qemu/queue.h"
