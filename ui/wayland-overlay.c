@@ -51,6 +51,15 @@ static const struct wl_registry_listener registry_listener = {
     .global_remove = NULL,
 };
 
+static void sub_window_flush_done(struct wayland_sub_window *sub)
+{
+    if (sub->valid) {
+        struct sdl2_console *sdlc = sub->wl_console->parent_console;
+        graphic_hw_gl_flush_done(sdlc->dcl.con, sub->fence);
+        sub->fence = 0;
+    }
+}
+
 static void commit_buffer(struct wayland_sub_window *sub, uint64_t fence_id);
 
 static void frame_handle_done(void *data, struct wl_callback *cb, uint32_t time)
@@ -61,9 +70,7 @@ static void frame_handle_done(void *data, struct wl_callback *cb, uint32_t time)
         sub->frame_callback = NULL;
         sub->framing = false;
 
-        struct sdl2_console *sdlc = sub->wl_console->parent_console;
-        graphic_hw_gl_flush_done(sdlc->dcl.con, sub->fence);
-        sub->fence = 0;
+        sub_window_flush_done(sub);
     }
 }
 
@@ -256,16 +263,29 @@ void wayland_flush_sub_window(struct wayland_sub_window *sub,
     }
 
     if (sub->valid) {
-        wl_subsurface_set_position(sub->subsurface, sub->x, sub->y);
-        /* Only first commit will triggered by flush */
-        /* Then weston handle the rest framing */
-        /* See: frame_handle_done */
-        if(!sub->framing) {
+        wl_subsurface_set_position(sub->subsurface_proxy, sub->x, sub->y);
+
+        if (sub->framing)
+        {
+            if (wl_display_dispatch_queue(sub->wl_console->display, sub->event_queue) < 0)
+            {
+                fprintf(stderr, "Failed to dispatch Wayland display queue\n");
+                return;
+            }
+            if (sub->framing)
+                return;
+        }
+
+        if (!sub->framing) {
             commit_buffer(sub, fence_id);
-            sub->framing = true;
+        } else {
+            sub_window_flush_done(sub);
+            fprintf(stderr, "[wayland] flush_sub_window %d already framing\n",
+                    sub->dmabuf->fd);
         }
     }
 
+    wl_display_flush(sub->wl_console->display);
     sub->flush_count = 0;
 }
 
@@ -357,9 +377,7 @@ static void wayland_release_sub_window_resources(struct wayland_sub_window *sub)
 
     if (sub->frame_callback) {
         if (sub->fence) {
-            struct sdl2_console *sdlc = sub->wl_console->parent_console;
-            graphic_hw_gl_flush_done(sdlc->dcl.con, sub->fence);
-            sub->fence = 0;
+            sub_window_flush_done(sub);
         }
         wl_callback_destroy(sub->frame_callback);
         sub->frame_callback = NULL;
