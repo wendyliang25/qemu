@@ -272,6 +272,15 @@ void graphic_hw_gl_block(QemuConsole *con, bool block)
     }
 }
 
+void graphic_hw_gl_flush_done(QemuConsole *con, uint64_t fence_id)
+{
+    if (con && con->hw_ops->gl_flush_done) {
+        con->hw_ops->gl_flush_done(con->hw, fence_id);
+    } else {
+        fprintf(stderr, "graphic_hw_gl_flush_done: no gl_flush_done handler\n");
+    }
+}
+
 int qemu_console_get_window_id(QemuConsole *con)
 {
     return con->window_id;

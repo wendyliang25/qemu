@@ -487,6 +487,7 @@ void graphic_hw_update_done(QemuConsole *con);
 void graphic_hw_invalidate(QemuConsole *con);
 void graphic_hw_text_update(QemuConsole *con, console_ch_t *chardata);
 void graphic_hw_gl_block(QemuConsole *con, bool block);
+void graphic_hw_gl_flush_done(QemuConsole *con, uint64_t fence_id);
 
 void qemu_console_early_init(void);
 
