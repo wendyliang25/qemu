@@ -524,7 +524,6 @@ void wayland_clean_invalid_sub_windows(struct wayland_console *parent)
 void wayland_poll_events(struct wayland_console *parent)
 {
     if (!parent || !parent->display) {
-        fprintf(stderr, "Invalid Wayland console or display\n");
         return;
     }
     struct wayland_sub_window *sub;
