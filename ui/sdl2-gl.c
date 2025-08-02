@@ -492,8 +492,7 @@ static void sdl2_gl_subwin_flush_sync(struct sdl2_console *scon){
     }
 }
 
-void sdl2_gl_scanout_flush(DisplayChangeListener *dcl,
-                           uint32_t x, uint32_t y, uint32_t w, uint32_t h)
+static void sdl2_gl_real_scanout_flush(DisplayChangeListener *dcl)
 {
     struct sdl2_console *scon = container_of(dcl, struct sdl2_console, dcl);
     struct SDL_WindowEglSurfaceData *data = SDL_GetWindowData(scon->real_window,
@@ -519,10 +518,20 @@ reflush:
     egl_fb_setup_default(&scon->win_fb, ww, wh);
     egl_fb_blit(&scon->win_fb, &scon->guest_fb, !scon->y0_top);
 
+    if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_WAYLAND && scon->wayland_console){
+        struct wayland_sub_window *sub;
+        QLIST_FOREACH(sub, &scon->wayland_console->sub_windows, next) {
+            wl_surface_commit(sub->surface_proxy);
+        }
+
+        wl_surface_commit(scon->wayland_console->main_surface);
+        wl_display_flush(scon->wayland_console->display);
+    }
+
     SDL_GL_SwapWindow(scon->real_window);
 
     if (sdl2_gl_check_reset_status(scon)) {
-        if(!sdl2_gl_recovery(scon, x, y, w, h)) {
+        if(!sdl2_gl_recovery(scon, scon->x, scon->y, scon->w, scon->h)) {
             fprintf(stderr, "sdl2_gl_scanout_flush: GPU recovery succeeded\n");
             goto reflush;
         }
@@ -532,7 +541,25 @@ reflush:
         }
     }
 
+    // sdl2_gl_subwin_flush_sync(scon);
+}
+
+void sdl2_gl_scanout_flush(DisplayChangeListener *dcl,
+                           uint32_t x, uint32_t y, uint32_t w, uint32_t h)
+{
+    struct sdl2_console *scon = container_of(dcl, struct sdl2_console, dcl);
+
+    scon->x = x;
+    scon->y = y;
+    scon->w = w;
+    scon->h = h;
+
+    if ( scon->wayland_console == NULL || scon->wayland_console->num_sub_windows == 0) {
+        sdl2_gl_real_scanout_flush(dcl);
+    }
+
     sdl2_gl_subwin_flush_sync(scon);
+
 }
 
 void sdl2_gl_overlay_flush(DisplayChangeListener *dcl, uint32_t id,
@@ -575,7 +602,7 @@ void sdl2_gl_overlay_flush(DisplayChangeListener *dcl, uint32_t id,
                             ov->y_coord);
 
         SDL_GL_SwapWindow(scon->real_window);
-    }else if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_SUBWIN) {
+    } else if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_SUBWIN) {
         struct sdl2_sub_window *sub = sdl2_find_sub_window(scon, id);
         if (!sub || !sub->window) {
             fprintf(stderr,"sdl2_gl_overlay_flush: sub-window not found for plane %u\n",
@@ -612,6 +639,13 @@ void sdl2_gl_overlay_flush(DisplayChangeListener *dcl, uint32_t id,
         wayland_flush_sub_window(sub, x, y, w, h, fence_id);
     } else {
         fprintf(stderr, "sdl2_gl_overlay_flush: type %d not supported\n", scon->present_type);
+        return;
+    }
+
+    scon->wayland_console->num_flushed++;
+    if( scon->wayland_console->num_flushed >= scon->wayland_console->num_sub_windows ) {
+        sdl2_gl_real_scanout_flush(dcl);
+        scon->wayland_console->num_flushed = 0;
     }
 }
 

@@ -109,6 +109,7 @@ struct wayland_console *wayland_console_init(void *parent_console,
     console->main_surface = main_surface;
     QLIST_INIT(&console->sub_windows);
     console->num_sub_windows = 0;
+    console->num_flushed = 0;
 
     struct wl_registry *registry = wl_display_get_registry(display);
     if(!registry) {
@@ -258,8 +259,6 @@ static void commit_buffer(struct wayland_sub_window *sub, uint64_t fence_id)
                 sub->frame_callback = wl_surface_frame(sub->surface);
                 wl_callback_add_listener(sub->frame_callback, &frame_listener, sub);
 
-                wl_surface_commit(sub->surface);
-
                 sub->framing = true;
             }
         }
@@ -301,7 +300,7 @@ void wayland_flush_sub_window(struct wayland_sub_window *sub,
         }
     }
 
-    wl_display_flush(sub->wl_console->display);
+    // wl_display_flush(sub->wl_console->display);
     sub->flush_count = 0;
 }
 
@@ -380,7 +379,7 @@ static bool wayland_create_sub_window_resources(struct wayland_console *parent,
     wl_proxy_set_queue((struct wl_proxy *)sub->subsurface_proxy, sub->event_queue);
 
     wl_subsurface_set_position(sub->subsurface_proxy, sub->x, sub->y);
-    wl_subsurface_set_desync(sub->subsurface_proxy);
+    wl_subsurface_set_sync(sub->subsurface_proxy);
 
     return true;
 }
@@ -548,7 +547,7 @@ void wayland_poll_events(struct wayland_console *parent)
 
 void wayland_suspend_sub_windows(struct wayland_console *console)
 {
-    struct wayland_sub_window *sub;
+    struct wayland_sub_window *sub, *next;
     int count = 0;
 
     if (!console) {
@@ -556,7 +555,7 @@ void wayland_suspend_sub_windows(struct wayland_console *console)
         return;
     }
 
-    QLIST_FOREACH(sub, &console->sub_windows, next) {
+    QLIST_FOREACH_SAFE(sub, &console->sub_windows, next, next) {
         count++;
         fprintf(stdout, "WAYLAND: Suspending sub-window %d (ID: %u) - Valid: %s, Surface: %s\n",
                count, sub->id,

@@ -78,6 +78,7 @@ struct wayland_console {
     struct zwp_linux_dmabuf_v1 *dmabuf_manager;
     struct wl_compositor *compositor;
     struct wl_subcompositor *subcompositor;
+    int num_flushed;
 };
 
 /* API function declarations */
