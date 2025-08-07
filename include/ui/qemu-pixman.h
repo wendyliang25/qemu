@@ -19,6 +19,11 @@
  * feeding libjpeg / libpng and writing screenshots.
  */
 
+ /* Supplement of pixman.h for more than 8-bit YUV formats */
+#define PIXMAN_TYPE_P010        12
+
+#define PIXMAN_p010	 (pixman_format_code_t)PIXMAN_FORMAT(16,PIXMAN_TYPE_P010,0,0,0,0)
+
 #if HOST_BIG_ENDIAN
 # define PIXMAN_BE_r8g8b8     PIXMAN_r8g8b8
 # define PIXMAN_BE_x8r8g8b8   PIXMAN_x8r8g8b8

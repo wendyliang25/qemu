@@ -43,6 +43,8 @@ virtio_gpu_get_pixman_format(uint32_t virtio_gpu_format)
         return PIXMAN_BE_x2b10g10r10;
     case VIRTIO_GPU_FORMAT_NV12_UNORM:
         return PIXMAN_yv12;
+    case VIRTIO_GPU_FORMAT_P010_UNORM:
+        return PIXMAN_p010;
     default:
         return 0;
     }
