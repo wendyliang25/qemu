@@ -111,6 +111,11 @@ struct wayland_console *wayland_console_init(void *parent_console,
     console->num_sub_windows = 0;
 
     struct wl_registry *registry = wl_display_get_registry(display);
+    if(!registry) {
+        fprintf(stderr, "[wayland] Failed to get Wayland registry\n");
+        g_free(console);
+        return NULL;
+    }
     wl_registry_add_listener(registry, &registry_listener, console);
     wl_display_roundtrip(display);
 
@@ -133,6 +138,8 @@ struct wayland_console *wayland_console_init(void *parent_console,
     return console;
 }
 
+static void wayland_release_sub_window_resources(struct wayland_sub_window *sub);
+
 void wayland_console_destroy(struct wayland_console *console)
 {
     struct wayland_sub_window *sub, *next;
@@ -142,7 +149,9 @@ void wayland_console_destroy(struct wayland_console *console)
     }
 
     QLIST_FOREACH_SAFE(sub, &console->sub_windows, next, next) {
-        wayland_destroy_sub_window(console, sub->id);
+        QLIST_REMOVE(sub, next);
+        wayland_release_sub_window_resources(sub);
+        g_free(sub);
     }
 
     g_free(console);
@@ -390,27 +399,27 @@ static void wayland_release_sub_window_resources(struct wayland_sub_window *sub)
         sub->frame_callback = NULL;
     }
 
-    if (sub->event_queue) {
-        wl_event_queue_destroy(sub->event_queue);
-        sub->event_queue = NULL;
+    if (sub->subsurface) {
+        wl_subsurface_destroy(sub->subsurface);
+        sub->subsurface = NULL;
+    }
+    if (sub->surface) {
+        wl_surface_destroy(sub->surface);
+        sub->surface = NULL;
     }
 
     if (sub->subsurface_proxy) {
         wl_proxy_wrapper_destroy(sub->subsurface_proxy);
         sub->subsurface_proxy = NULL;
     }
-    if (sub->subsurface) {
-        wl_subsurface_destroy(sub->subsurface);
-        sub->subsurface = NULL;
-    }
-
     if (sub->surface_proxy) {
         wl_proxy_wrapper_destroy(sub->surface_proxy);
         sub->surface_proxy = NULL;
     }
-    if (sub->surface) {
-        wl_surface_destroy(sub->surface);
-        sub->surface = NULL;
+
+    if (sub->event_queue) {
+        wl_event_queue_destroy(sub->event_queue);
+        sub->event_queue = NULL;
     }
 }
 
