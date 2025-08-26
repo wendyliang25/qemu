@@ -545,3 +545,53 @@ void wayland_poll_events(struct wayland_console *parent)
         }
     }
 }
+
+void wayland_suspend_sub_windows(struct wayland_console *console)
+{
+    struct wayland_sub_window *sub;
+    int count = 0;
+
+    if (!console) {
+        fprintf(stderr, "Console is NULL, nothing to suspend\n");
+        return;
+    }
+
+    QLIST_FOREACH(sub, &console->sub_windows, next) {
+        count++;
+        fprintf(stdout, "WAYLAND: Suspending sub-window %d (ID: %u) - Valid: %s, Surface: %s\n",
+               count, sub->id,
+               sub->valid ? "yes" : "no",
+               sub->surface ? "present" : "none");
+
+        if (sub->valid && sub->surface) {
+
+            if (sub->frame_callback) {
+                wl_callback_destroy(sub->frame_callback);
+                sub->frame_callback = NULL;
+                sub->framing = false;
+            }
+
+            if (sub->buffer_queued) {
+                sub->buffer_queued = false;
+            }
+            wayland_destroy_sub_window(console, sub->id);
+        }
+    }
+
+    if (console->display) {
+        wl_display_flush(console->display);
+    }
+
+}
+
+void wayland_resume_sub_windows(struct wayland_console *console)
+{
+    if (!console) {
+        fprintf(stderr, "Console is NULL, nothing to resume\n");
+        return;
+    }
+
+    if (console->display) {
+        wl_display_flush(console->display);
+    }
+}

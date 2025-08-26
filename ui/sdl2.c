@@ -1159,7 +1159,10 @@ static void sdl2_subwin_suspend_handler(Notifier *notifier, void *data)
     for (i = 0; i < sdl2_num_outputs; i++) {
         struct sdl2_console *scon = &sdl2_console[i];
         if (scon->real_window) {
-            if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_SUBWIN ) {
+            if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_WAYLAND) {
+                if (scon->wayland_console)
+                    wayland_suspend_sub_windows(scon->wayland_console);
+            } else if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_SUBWIN ) {
                 struct sdl2_sub_window *sub;
                 for (sub = scon->sub_windows; sub != NULL; sub = sub->next) {
                     SDL_HideWindow(sub->window);
