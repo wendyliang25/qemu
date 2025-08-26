@@ -35,6 +35,8 @@
 #include <virglrenderer.h>
 #endif
 
+#include "ui/wayland-overlay.h"
+
 static int sdl2_gl_recovery(struct sdl2_console *scon, uint32_t x, uint32_t y,
                             uint32_t w, uint32_t h);
 static int sdl2_gl_check_reset_status(struct sdl2_console *scon);
@@ -147,10 +149,12 @@ void sdl2_gl_refresh(DisplayChangeListener *dcl)
         sdl2_gl_render_surface(scon);
     }
     sdl2_clean_invalid_sub_windows(scon);
-    wayland_clean_invalid_sub_windows(scon->wayland_console);
+    if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_WAYLAND)
+        wayland_clean_invalid_sub_windows(scon->wayland_console);
 
     sdl2_poll_events(scon);
-    wayland_poll_events(scon->wayland_console);
+    if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_WAYLAND)
+        wayland_poll_events(scon->wayland_console);
 }
 
 void sdl2_gl_redraw(struct sdl2_console *scon)
@@ -292,6 +296,11 @@ static void sdl2_init_wayland_overlay(struct sdl2_console *scon)
     wl_display = wm_info.info.wl.display;
     wl_surface = wm_info.info.wl.surface;
 
+    if (!wl_display || !wl_surface) {
+        fprintf(stderr, "SDL_GetWindowWMInfo: Wayland display or surface not available\n");
+        return;
+    }
+
     scon->wayland_console = wayland_console_init(scon, wl_display, wl_surface);
 
     if (!scon->wayland_console) {
@@ -299,7 +308,7 @@ static void sdl2_init_wayland_overlay(struct sdl2_console *scon)
         return;
     }
 
-    fprintf(stderr, "Wayland overlay initialized successfully\n");
+    fprintf(stdout, "Wayland overlay initialized successfully\n");
 }
 
 void sdl2_gl_overlay_dmabuf(DisplayChangeListener *dcl, QemuDmaBuf *dmabuf,
@@ -658,6 +667,14 @@ static int sdl2_gl_recovery(struct sdl2_console *scon, uint32_t x, uint32_t y,
     SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
     surface_gl_destroy_texture(scon->gls, scon->surface);
     qemu_gl_fini_shader(scon->gls);
+
+    if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_WAYLAND && scon->wayland_console) {
+        fprintf(stderr, "sdl2_gl_recovery: destroying wayland console before SDL window destruction\n");
+        wl_display_roundtrip(scon->wayland_console->display);
+        wayland_console_destroy(scon->wayland_console);
+        scon->wayland_console = NULL;
+    }
+
     sdl2_window_destroy(scon);
 
     /* 2, Recreate the contexs and the resources */
@@ -668,6 +685,18 @@ static int sdl2_gl_recovery(struct sdl2_console *scon, uint32_t x, uint32_t y,
     surface_gl_create_texture(scon->gls, scon->surface);
     sdl2_window_show(scon);
     SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
+
+    if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_WAYLAND && !scon->wayland_console) {
+        sdl2_init_wayland_overlay(scon);
+
+        if (scon->wayland_console) {
+            fprintf(stderr, "sdl2_gl_recovery: wayland console recreated successfully\n");
+        } else {
+            fprintf(stderr, "sdl2_gl_recovery: failed to recreate wayland console\n");
+            return -ENOMEM;
+        }
+    }
+
 #ifdef CONFIG_VIRGL
     if (virgl_renderer_restore_ctx0())
         return -EINVAL;
