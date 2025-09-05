@@ -194,4 +194,8 @@ void sdl2_destroy_sub_window(struct sdl2_console *parent,
 
 void sdl2_clean_invalid_sub_windows(struct sdl2_console *parent);
 
+/* Expose suspend/resume handlers for reuse from other code paths */
+void sdl2_subwin_suspend_handler(Notifier *notifier, void *data);
+void sdl2_subwin_resume_handler(Notifier *notifier, void *data);
+
 #endif /* SDL2_H */

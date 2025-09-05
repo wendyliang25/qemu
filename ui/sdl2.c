@@ -1152,7 +1152,7 @@ static void sdl_mouse_define(DisplayChangeListener *dcl,
     }
 }
 
-static void sdl2_subwin_suspend_handler(Notifier *notifier, void *data)
+void sdl2_subwin_suspend_handler(Notifier *notifier, void *data)
 {
     int i;
 
@@ -1172,7 +1172,7 @@ static void sdl2_subwin_suspend_handler(Notifier *notifier, void *data)
     }
 }
 
-static void sdl2_subwin_resume_handler(Notifier *notifier, void *data)
+void sdl2_subwin_resume_handler(Notifier *notifier, void *data)
 {
     int i;
 
