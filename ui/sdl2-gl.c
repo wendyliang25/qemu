@@ -238,6 +238,15 @@ void sdl2_set_dpms(DisplayChangeListener *dcl, uint32_t level)
 #endif
 }
 
+void sdl2_set_suspend_state(DisplayChangeListener *dcl, bool suspend)
+{
+    if (suspend) {
+        sdl2_subwin_suspend_handler(NULL, NULL);
+    } else {
+        sdl2_subwin_resume_handler(NULL, NULL);
+    }
+}
+
 void sdl2_gl_scanout_disable(DisplayChangeListener *dcl)
 {
     struct sdl2_console *scon = container_of(dcl, struct sdl2_console, dcl);

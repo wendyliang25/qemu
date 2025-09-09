@@ -2060,6 +2060,21 @@ void dpy_set_dpms(QemuConsole *con, qdpms_enum level)
     }
 }
 
+void dpy_set_suspend_state(QemuConsole *con, bool suspend)
+{
+    DisplayState *s = con->ds;
+    DisplayChangeListener *dcl;
+
+    QLIST_FOREACH(dcl, &s->listeners, next) {
+        if (con != (dcl->con ? dcl->con : active_console)) {
+            continue;
+        }
+        if (dcl->ops->dpy_set_suspend_state) {
+                dcl->ops->dpy_set_suspend_state(dcl, suspend);
+        }
+    }
+}
+
 void dpy_gl_scanout_disable(QemuConsole *con)
 {
     DisplayState *s = con->ds;

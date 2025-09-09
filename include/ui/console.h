@@ -306,6 +306,9 @@ typedef struct DisplayChangeListenerOps {
 
     /* optional */
     void (*dpy_set_dpms)(DisplayChangeListener *dcl, qdpms_enum level);
+
+    /* optional */
+    void (*dpy_set_suspend_state)(DisplayChangeListener *dcl, bool suspend);
 } DisplayChangeListenerOps;
 
 struct DisplayChangeListener {
@@ -409,6 +412,7 @@ void dpy_gl_update_overlay(QemuConsole *con, uint32_t id,
                            uint64_t fence_id);
 void dpy_gl_set_hdcp(QemuConsole *con, uint32_t type, uint32_t mode);
 void dpy_set_dpms(QemuConsole *con, qdpms_enum level);
+void dpy_set_suspend_state(QemuConsole *con, bool suspend);
 QEMUGLContext dpy_gl_ctx_create(QemuConsole *con,
                                 QEMUGLParams *params);
 void dpy_gl_ctx_destroy(QemuConsole *con, QEMUGLContext ctx);
