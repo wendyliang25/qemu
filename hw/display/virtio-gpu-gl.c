@@ -141,6 +141,7 @@ virtio_gpu_gl_update_status(VirtIODevice *vdev, uint8_t val)
         } else {
             if (virtio_gpu_dpms_enabled(b->conf))
                 dpy_set_dpms(b->scanout[i].con, CON_DPMS_ON);
+            dpy_gfx_restore_scanout_from_backup(b->scanout[i].con);
         }
     }
 }

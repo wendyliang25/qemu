@@ -83,6 +83,12 @@ struct QemuConsole {
     DisplayState *ds;
     DisplaySurface *surface;
     DisplayScanout scanout;
+    DisplayScanout scanout_backup;
+
+    struct {
+        uint32_t x, y, w, h;
+    } gl_update_backup;
+
     int dcls;
     DisplayGLCtx *gl;
     int gl_block;
@@ -1836,6 +1842,8 @@ void dpy_gfx_update_surface_with_blank(QemuConsole *con)
     DisplayChangeListener *dcl;
     int w, h;
 
+    con->scanout_backup = con->scanout;
+
     if (old_surface) {
         w = surface_width(old_surface);
         h = surface_height(old_surface);
@@ -1858,6 +1866,20 @@ void dpy_gfx_update_surface_with_blank(QemuConsole *con)
     }
     dpy_gfx_destroy_texture(con, old_surface);
     qemu_free_displaysurface(old_surface);
+}
+
+void dpy_gfx_restore_scanout_from_backup(QemuConsole *con)
+{
+     /* Currently only SCANOUT_DMABUF under GL is supported */
+    if ((con->scanout_backup.kind != SCANOUT_DMABUF) || !con->gl)
+        return;
+
+    con->scanout = con->scanout_backup;
+    dpy_gl_scanout_dmabuf(con, con->scanout_backup.dmabuf);
+    dpy_gl_update(con, con->gl_update_backup.x, con->gl_update_backup.y,
+                 con->gl_update_backup.w, con->gl_update_backup.h);
+
+    con->scanout_backup.kind = SCANOUT_NONE;
 }
 
 bool dpy_gfx_check_format(QemuConsole *con,
@@ -2173,6 +2195,11 @@ void dpy_gl_update(QemuConsole *con,
     DisplayChangeListener *dcl;
 
     assert(con->gl);
+
+    con->gl_update_backup.x = x;
+    con->gl_update_backup.y = y;
+    con->gl_update_backup.w = w;
+    con->gl_update_backup.h = h;
 
     graphic_hw_gl_block(con, true);
     QLIST_FOREACH(dcl, &s->listeners, next) {
