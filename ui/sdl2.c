@@ -53,9 +53,6 @@ static int guest_cursor;
 static int guest_x, guest_y;
 static SDL_Cursor *guest_sprite;
 static Notifier mouse_mode_notifier;
-/* Suspend/Resume event handling */
-static Notifier sdl2_suspend_notifier;
-static Notifier sdl2_resume_notifier;
 
 #define SDL2_REFRESH_INTERVAL_BUSY 10
 #define SDL2_MAX_IDLE_COUNT (2 * GUI_REFRESH_INTERVAL_DEFAULT \
@@ -1393,15 +1390,6 @@ static void sdl2_display_init(DisplayState *ds, DisplayOptions *o)
     SDL_SetEventFilter(sdl2_event_filter, NULL);
     mouse_mode_notifier.notify = sdl_mouse_mode_change;
     qemu_add_mouse_mode_change_notifier(&mouse_mode_notifier);
-
-    /* Register suspend/resume event handlers */
-    fprintf(stdout, "SDL2: Registering suspend/resume event handlers\n");
-    sdl2_suspend_notifier.notify = sdl2_subwin_suspend_handler;
-    qemu_register_suspend_notifier(&sdl2_suspend_notifier);
-
-    sdl2_resume_notifier.notify = sdl2_subwin_resume_handler;
-    qemu_register_wakeup_notifier(&sdl2_resume_notifier);
-    fprintf(stdout, "SDL2: Suspend/resume handlers registered successfully\n");
 
     sdl_cursor_hidden = SDL_CreateCursor(&data, &data, 8, 1, 0, 0);
     sdl_cursor_normal = SDL_GetCursor();
