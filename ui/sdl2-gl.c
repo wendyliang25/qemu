@@ -396,20 +396,17 @@ void sdl2_gl_overlay_dmabuf(DisplayChangeListener *dcl, QemuDmaBuf *dmabuf,
             }
         }
 
+        wayland_update_sub_window(scon->wayland_console, id,
+                                  dmabuf->x_coord, dmabuf->y_coord,
+                                  dmabuf->width, dmabuf->height,
+                                  dmabuf->x, dmabuf->y, dmabuf->width, dmabuf->height,
+                                  dmabuf->zpos, dmabuf->alpha);
         struct wayland_sub_window *sub = wayland_find_sub_window(scon->wayland_console, id);
         if (!sub) {
-            wayland_update_sub_window(scon->wayland_console, id,
-                                     dmabuf->x_coord, dmabuf->y_coord,
-                                     dmabuf->width, dmabuf->height,
-                                     0, 0, dmabuf->width, dmabuf->height,
-                                     dmabuf->zpos, dmabuf->alpha);
-            sub = wayland_find_sub_window(scon->wayland_console, id);
-            if (!sub) {
                 fprintf(stderr, "sdl2_gl_overlay_dmabuf: wayland sub-window creation failed\n");
                 return;
-            }
-        }
 
+        }
         wayland_update_dmabuf(sub, dmabuf);
 
         SDL_GL_MakeCurrent(scon->real_window, scon->winctx);

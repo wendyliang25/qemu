@@ -628,8 +628,11 @@ void wayland_update_sub_window(struct wayland_console *parent,
         }
     }
 
-    sub->x = x;
-    sub->y = y;
+    if (x == 0) sub->x = -src_x;
+    else sub->x = x;
+    if (y == 0) sub->y = -src_y;
+    else sub->y = y;
+
     sub->width = width;
     sub->height = height;
     sub->src_x = src_x;
