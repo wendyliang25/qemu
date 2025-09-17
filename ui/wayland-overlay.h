@@ -79,6 +79,15 @@ struct wayland_console {
     struct wl_compositor *compositor;
     struct wl_subcompositor *subcompositor;
     int num_flushed;
+
+    struct wl_seat *seat;
+    struct wl_keyboard *keyboard;
+    struct wl_pointer *pointer;
+
+    struct wayland_sub_window *pointer_focus_sub;
+    bool pointer_grab;
+    int32_t pointer_last_x;
+    int32_t pointer_last_y;
 };
 
 /* API function declarations */
