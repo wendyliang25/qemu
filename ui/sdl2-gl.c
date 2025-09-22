@@ -708,9 +708,34 @@ static int sdl2_gl_recovery(struct sdl2_console *scon, uint32_t x, uint32_t y,
     surface_gl_destroy_texture(scon->gls, scon->surface);
     qemu_gl_fini_shader(scon->gls);
 
+    egl_fb_destroy(&scon->guest_fb);
+    egl_fb_destroy(&scon->win_fb);
+    if (scon->guest_fb.dmabuf) {
+        scon->guest_fb.dmabuf->texture = 0;
+        scon->guest_fb.dmabuf = NULL;
+    }
+    for (int i = 0; i < SDL2_GL_MAX_OVERLAY_NUM; i++) {
+        egl_overlay_fb *ov = &scon->guest_overlay_fbs[i];
+        if (ov->valid) {
+            egl_fb_destroy(&ov->fb);
+            if (ov->fb.dmabuf) {
+                ov->fb.dmabuf->texture = 0;
+                ov->fb.dmabuf = NULL;
+            }
+            ov->valid = false;
+        }
+    }
+    for (struct sdl2_sub_window *sub = scon->sub_windows; sub != NULL; sub = sub->next) {
+        egl_fb_destroy(&sub->guest_fb);
+        egl_fb_destroy(&sub->win_fb);
+        if (sub->guest_fb.dmabuf) {
+            sub->guest_fb.dmabuf->texture = 0;
+            sub->guest_fb.dmabuf = NULL;
+        }
+    }
+
     if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_WAYLAND && scon->wayland_console) {
         fprintf(stderr, "sdl2_gl_recovery: destroying wayland console before SDL window destruction\n");
-        wl_display_roundtrip(scon->wayland_console->display);
         wayland_console_destroy(scon->wayland_console);
         scon->wayland_console = NULL;
     }
@@ -727,7 +752,9 @@ static int sdl2_gl_recovery(struct sdl2_console *scon, uint32_t x, uint32_t y,
     SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
 
     if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_WAYLAND && !scon->wayland_console) {
-        sdl2_init_wayland_overlay(scon);
+        if (!scon->wayland_console || wayland_is_alive(scon->wayland_console)) {
+            sdl2_init_wayland_overlay(scon);
+        }
 
         if (scon->wayland_console) {
             fprintf(stderr, "sdl2_gl_recovery: wayland console recreated successfully\n");

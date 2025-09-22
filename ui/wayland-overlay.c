@@ -50,9 +50,17 @@ static void registry_global(void *data, struct wl_registry *registry,
     }
 }
 
+static void registry_global_remove(void *data, struct wl_registry *registry,
+                                   uint32_t id)
+{
+    (void)data;
+    (void)registry;
+    (void)id;
+}
+
 static const struct wl_registry_listener registry_listener = {
     .global = registry_global,
-    .global_remove = NULL,
+    .global_remove = registry_global_remove,
 };
 
 static void wayland_pointer_send_motion(struct wayland_console *console,
@@ -841,8 +849,8 @@ void wayland_poll_events(struct wayland_console *parent)
     }
     struct wayland_sub_window *sub;
     QLIST_FOREACH(sub, &parent->sub_windows, next) {
-        if (!sub->event_queue) {
-            if(wl_display_dispatch_queue_pending(parent->display, sub->event_queue) < 0) {
+        if (sub->event_queue) {
+            if (wl_display_dispatch_queue_pending(parent->display, sub->event_queue) < 0) {
                 fprintf(stderr, "Failed to dispatch Wayland display queue\n");
                 return;
             }
@@ -898,4 +906,21 @@ void wayland_resume_sub_windows(struct wayland_console *console)
     if (console->display) {
         wl_display_flush(console->display);
     }
+}
+
+bool wayland_is_alive(struct wayland_console *console)
+{
+    if (!console || !console->display) {
+        return false;
+    }
+    /* Prefer explicit error query */
+    if (wl_display_get_error(console->display) != 0) {
+        return false;
+    }
+    /* Try a non-blocking flush to detect EPIPE */
+    int rc = wl_display_flush(console->display);
+    if (rc < 0) {
+        return false;
+    }
+    return true;
 }

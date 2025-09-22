@@ -137,6 +137,13 @@ void egl_fb_blit_overlay(egl_fb *dst, egl_fb *src, bool flip, uint32_t x_coord,
                          uint32_t y_coord)
 
 {
+
+    if (!dst || !src) {
+        return;
+    }
+    if (dst->framebuffer == 0 && src->framebuffer == 0) {
+        return;
+    }
     GLuint x1 = 0;
     GLuint y1 = 0;
     GLuint x2, y2;
@@ -171,13 +178,23 @@ void egl_fb_blit_overlay(egl_fb *dst, egl_fb *src, bool flip, uint32_t x_coord,
     dst_x2 = x_coord + w;
     dst_y2 = flip? (dst->height - (y_coord + h)) : (y_coord + h);
 
-    glBlitFramebuffer(x1, y1, x2, y2,
-                      dst_x1, dst_y1, dst_x2, dst_y2,
-                      GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    GLenum status_read = glCheckFramebufferStatus(GL_READ_FRAMEBUFFER);
+    GLenum status_draw = glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER);
+    if (status_read == GL_FRAMEBUFFER_COMPLETE && status_draw == GL_FRAMEBUFFER_COMPLETE) {
+        glBlitFramebuffer(x1, y1, x2, y2,
+                          dst_x1, dst_y1, dst_x2, dst_y2,
+                          GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    }
 }
 
 void egl_fb_blit(egl_fb *dst, egl_fb *src, bool flip)
 {
+    if (!dst || !src) {
+        return;
+    }
+    if (dst->framebuffer == 0 && src->framebuffer == 0) {
+        return;
+    }
     GLuint x1 = 0;
     GLuint y1 = 0;
     GLuint x2, y2;
@@ -202,9 +219,13 @@ void egl_fb_blit(egl_fb *dst, egl_fb *src, bool flip)
     y1 = flip ? h + y1 : y1;
     x2 = x1 + w;
 
-    glBlitFramebuffer(x1, y1, x2, y2,
-                      0, 0, dst->width, dst->height,
-                      GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    GLenum status_read = glCheckFramebufferStatus(GL_READ_FRAMEBUFFER);
+    GLenum status_draw = glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER);
+    if (status_read == GL_FRAMEBUFFER_COMPLETE && status_draw == GL_FRAMEBUFFER_COMPLETE) {
+        glBlitFramebuffer(x1, y1, x2, y2,
+                          0, 0, dst->width, dst->height,
+                          GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    }
 }
 
 void egl_fb_read(DisplaySurface *dst, egl_fb *src)
