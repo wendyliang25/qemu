@@ -135,4 +135,6 @@ void wayland_resume_sub_windows(struct wayland_console *console);
 struct wayland_console *wayland_console_init(void *parent_console, struct wl_display *display, struct wl_surface *main_surface);
 void wayland_console_destroy(struct wayland_console *console);
 
+bool wayland_is_alive(struct wayland_console *console);
+
 #endif /* WAYLAND_OVERLAY_H */
