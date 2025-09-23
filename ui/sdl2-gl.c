@@ -426,10 +426,10 @@ void sdl2_gl_scanout_dmabuf(DisplayChangeListener *dcl,
     if (sdl2_gl_check_reset_status(scon)) {
         if(sdl2_gl_recovery(scon, dmabuf->x, dmabuf->y, dmabuf->width, dmabuf->height)) {
             fprintf(stderr, "sdl2_gl_scanout_dmabuf: GPU recovery failed!\n");
-            return;
         } else {
             fprintf(stderr, "sdl2_gl_scanout_dmabuf: GPU recovery succeeded\n");
         }
+        return;
     }
 
     egl_dmabuf_import_texture(dmabuf);
@@ -516,9 +516,18 @@ static void sdl2_gl_real_scanout_flush(DisplayChangeListener *dcl)
     if (data && scon->guest_fb.dmabuf && data->current_frame_state != scon->guest_fb.dmabuf->protected)
         data->frame_need_protected = scon->guest_fb.dmabuf->protected;
 
-reflush:
     /* Drawing is synchronous here, so no need to use graphic_hw_gl_block. */
     SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
+
+    if (sdl2_gl_check_reset_status(scon)) {
+        if(!sdl2_gl_recovery(scon, scon->x, scon->y, scon->w, scon->h)) {
+            fprintf(stderr, "sdl2_gl_scanout_flush: GPU recovery succeeded\n");
+        }
+        else {
+            fprintf(stderr, "sdl2_gl_scanout_flush: GPU recovery failed\n");
+        }
+        return;
+    }
 
     SDL_GetWindowSize(scon->real_window, &ww, &wh);
     egl_fb_setup_default(&scon->win_fb, ww, wh);
@@ -535,17 +544,6 @@ reflush:
     }
 
     SDL_GL_SwapWindow(scon->real_window);
-
-    if (sdl2_gl_check_reset_status(scon)) {
-        if(!sdl2_gl_recovery(scon, scon->x, scon->y, scon->w, scon->h)) {
-            fprintf(stderr, "sdl2_gl_scanout_flush: GPU recovery succeeded\n");
-            goto reflush;
-        }
-        else {
-            fprintf(stderr, "sdl2_gl_scanout_flush: GPU recovery failed\n");
-            return;
-        }
-    }
 
     // sdl2_gl_subwin_flush_sync(scon);
 }
