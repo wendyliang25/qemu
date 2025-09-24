@@ -41,6 +41,9 @@ typedef struct egl_overlay_fb {
     uint32_t x_coord;
     uint32_t y_coord;
 
+    /* Scale the resource from width x height to scale_width x scale_height */
+    uint32_t scale_width;
+    uint32_t scale_height;
 } egl_overlay_fb;
 
 enum sdl2_overlay_present_type {

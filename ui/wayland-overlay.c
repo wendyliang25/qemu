@@ -47,6 +47,8 @@ static void registry_global(void *data, struct wl_registry *registry,
     } else if (strcmp(interface, "wl_seat") == 0) {
         uint32_t seat_ver = MIN((uint32_t)version, 5u);
         out->seat = wl_registry_bind(registry, id, &wl_seat_interface, seat_ver);
+    } else if (strcmp(interface, wp_viewporter_interface.name) == 0) {
+         out->viewporter = wl_registry_bind(registry, id, &wp_viewporter_interface, 1);
     }
 }
 
@@ -620,7 +622,8 @@ void wayland_update_sub_window(struct wayland_console *parent,
                                uint32_t width, uint32_t height,
                                uint32_t src_x, uint32_t src_y,
                                uint32_t src_width, uint32_t src_height,
-                               uint32_t zpos, uint8_t alpha)
+                               uint32_t zpos, uint8_t alpha,
+                               uint32_t scale_width, uint32_t scale_height)
 {
     struct wayland_sub_window *sub = wayland_find_sub_window(parent, plane_id);
 
@@ -643,6 +646,8 @@ void wayland_update_sub_window(struct wayland_console *parent,
 
     sub->width = width;
     sub->height = height;
+    sub->scale_width = scale_width;
+    sub->scale_height = scale_height;
     sub->src_x = src_x;
     sub->src_y = src_y;
     sub->src_width = src_width;
@@ -651,6 +656,9 @@ void wayland_update_sub_window(struct wayland_console *parent,
     sub->zpos = zpos;
     sub->valid = true;
     sub->flush_count = 0;
+
+    if (sub->viewport && (width != scale_width || height != scale_height))
+        wp_viewport_set_destination(sub->viewport, scale_width, scale_height);
 
     if (sub->subsurface) {
         wl_subsurface_set_position(sub->subsurface, x, y);
@@ -691,6 +699,11 @@ static bool wayland_create_sub_window_resources(struct wayland_console *parent,
     }
     wl_proxy_set_queue((struct wl_proxy *)sub->subsurface_proxy, sub->event_queue);
 
+    if (parent->viewporter)
+        sub->viewport = wp_viewporter_get_viewport(parent->viewporter, sub->surface);
+    if (sub->viewport)
+        fprintf(stderr, "Warning: Overlay scaling is not supported!\n");
+
     wl_subsurface_set_position(sub->subsurface_proxy, sub->x, sub->y);
     wl_subsurface_set_sync(sub->subsurface_proxy);
 
@@ -710,6 +723,9 @@ static void wayland_release_sub_window_resources(struct wayland_sub_window *sub)
         wl_callback_destroy(sub->frame_callback);
         sub->frame_callback = NULL;
     }
+
+    if (sub->viewport)
+        wp_viewport_destroy(sub->viewport);
 
     if (sub->subsurface) {
         wl_subsurface_destroy(sub->subsurface);
