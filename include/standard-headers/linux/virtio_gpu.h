@@ -473,6 +473,8 @@ struct virtio_gpu_set_overlay_blob {
 	__le32 resource_id;
 	__le32 width;
 	__le32 height;
+	__le32 scale_width;
+	__le32 scale_height;
 	__le32 format;
 	__le32 alpha;
 	__le32 zpos;
