@@ -227,6 +227,8 @@ static VGPUDMABuf
         dmabuf->buf.alpha = res->alpha;
         dmabuf->buf.x_coord = res->x_coord;
         dmabuf->buf.y_coord = res->y_coord;
+        dmabuf->buf.scale_width = res->scale_width;
+        dmabuf->buf.scale_height = res->scale_height;
     }
 
     QTAILQ_INSERT_HEAD(&g->dmabuf.bufs, dmabuf, next);

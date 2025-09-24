@@ -200,6 +200,9 @@ typedef struct QemuDmaBuf {
     /* The position inside the scanout buffer */
     uint32_t  x_coord;
     uint32_t  y_coord;
+    /* Scale the buffer from width x height to scale_width x scale_height */
+    uint32_t scale_width;
+    uint32_t scale_height;
     /* For multiple planes format support */
     uint32_t  strides[4];
     uint32_t  offsets[4];

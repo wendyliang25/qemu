@@ -82,6 +82,9 @@ struct virtio_gpu_simple_resource {
     uint32_t  strides[4];
     uint32_t  offsets[4];
     uint32_t  num_planes;
+    /* Scale the resource from width x height to scale_width x scale_height */
+    uint32_t scale_width;
+    uint32_t scale_height;
 };
 
 struct virtio_gpu_framebuffer {

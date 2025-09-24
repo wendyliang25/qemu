@@ -994,6 +994,8 @@ static void virgl_cmd_set_overlay_blob(VirtIOGPU *g,
     vres->res.x_coord = so.x_coord;
     vres->res.y_coord = so.y_coord;
     vres->res.num_planes = so.num_planes;
+    vres->res.scale_width = so.scale_width;
+    vres->res.scale_height = so.scale_height;
     for (i = 0; i < so.num_planes; i++) {
         vres->res.strides[i] = so.strides[i];
         vres->res.offsets[i] = so.offsets[i];
