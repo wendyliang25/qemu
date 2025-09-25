@@ -27,6 +27,11 @@
 #include "qemu/module.h"
 #include "qemu/cutils.h"
 #include "ui/console.h"
+#include "qom/object.h"
+#include "qemu/bswap.h"
+#include "hw/virtio/virtio-gpu.h"
+#include "hw/virtio/virtio-gpu-pci.h"
+#include "hw/display/virtio-vga.h"
 #include "ui/input.h"
 #include "ui/sdl2.h"
 #include "sysemu/runstate.h"
@@ -1346,7 +1351,30 @@ static void sdl2_display_init(DisplayState *ds, DisplayOptions *o)
         sdl2_console[i].opengl = display_opengl;
         sdl2_console[i].dcl.ops = display_opengl ? &dcl_gl_ops : &dcl_2d_ops;
         sdl2_console[i].dgc.ops = display_opengl ? &gl_ctx_ops : NULL;
-        sdl2_console[i].present_type = SDL2_OVERLAY_PRESENT_TYPE_WAYLAND;
+        sdl2_console[i].present_type = SDL2_OVERLAY_PRESENT_TYPE_NONE;
+
+        if (display_opengl && qemu_console_is_graphic(con)) {
+            Object *dev_obj = object_property_get_link(OBJECT(con), "device", NULL);
+            if (dev_obj) {
+                VirtIOGPUBase *vgpu = NULL;
+
+                if (object_dynamic_cast(dev_obj, TYPE_VIRTIO_GPU_PCI_BASE)) {
+                    VirtIOGPUPCIBase *pci = VIRTIO_GPU_PCI_BASE(dev_obj);
+                    vgpu = pci ? pci->vgpu : NULL;
+                } else if (object_dynamic_cast(dev_obj, TYPE_VIRTIO_VGA_BASE)) {
+                    VirtIOVGABase *vga = VIRTIO_VGA_BASE(dev_obj);
+                    vgpu = vga ? vga->vgpu : NULL;
+                }
+
+                if (vgpu && i < VIRTIO_GPU_MAX_SCANOUTS) {
+                    uint32_t num_overlays = 0;
+                    num_overlays = le32_to_cpu(vgpu->virtio_config.num_overlays[i]);
+                    sdl2_console[i].present_type = (num_overlays > 0)
+                        ? SDL2_OVERLAY_PRESENT_TYPE_WAYLAND
+                        : SDL2_OVERLAY_PRESENT_TYPE_NONE;
+                }
+            }
+        }
         SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, true);
 #else
         sdl2_console[i].opengl = 0;
