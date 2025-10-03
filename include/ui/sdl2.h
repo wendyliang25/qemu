@@ -124,6 +124,7 @@ void sdl2_window_hide(struct sdl2_console *scon);
 void sdl2_window_show(struct sdl2_console *scon);
 void sdl2_window_resize(struct sdl2_console *scon);
 void sdl2_poll_events(struct sdl2_console *scon);
+void sdl2_display_reinit(void);
 
 void sdl2_process_key(struct sdl2_console *scon,
                       SDL_KeyboardEvent *ev);

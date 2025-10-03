@@ -744,6 +744,7 @@ static int sdl2_gl_recovery(struct sdl2_console *scon, uint32_t x, uint32_t y,
     sdl2_window_destroy(scon);
 
     /* 2, Recreate the contexs and the resources */
+    sdl2_display_reinit();
     sdl2_window_create(scon);
     scon->gls = qemu_gl_init_shader();
     if (!scon->gls)

@@ -70,6 +70,7 @@ static Notifier mouse_mode_notifier;
 
 static void sdl_update_caption(struct sdl2_console *scon);
 static void sdl2_enable_dmabuf_scanout(void);
+static void sdl_cleanup(void);
 
 static struct sdl2_console *get_scon_from_window(uint32_t window_id)
 {
@@ -186,6 +187,33 @@ void sdl2_window_resize(struct sdl2_console *scon)
     SDL_SetWindowSize(scon->real_window,
                       surface_width(scon->surface),
                       surface_height(scon->surface));
+}
+
+void sdl2_display_reinit(void)
+{
+    sdl_cleanup();
+
+    if (SDL_GetHintBoolean("QEMU_ENABLE_SDL_LOGGING", SDL_FALSE)) {
+        SDL_LogSetAllPriority(SDL_LOG_PRIORITY_VERBOSE);
+    }
+
+    if (SDL_Init(SDL_INIT_VIDEO)) {
+        fprintf(stderr, "Could not initialize SDL(%s) - exiting\n",
+                SDL_GetError());
+        exit(1);
+    }
+#ifdef SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR /* only available since SDL 2.0.8 */
+    SDL_SetHint(SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR, "0");
+#endif
+#ifndef CONFIG_WIN32
+    /* QEMU uses its own low level keyboard hook procecure on Windows */
+    SDL_SetHint(SDL_HINT_GRAB_KEYBOARD, "1");
+#endif
+#ifdef SDL_HINT_ALLOW_ALT_TAB_WHILE_GRABBED
+    SDL_SetHint(SDL_HINT_ALLOW_ALT_TAB_WHILE_GRABBED, "0");
+#endif
+    SDL_SetHint(SDL_HINT_WINDOWS_NO_CLOSE_ON_ALT_F4, "1");
+    SDL_SetHint(SDL_HINT_VIDEO_X11_FORCE_EGL, "1");
 }
 
 static void sdl2_redraw(struct sdl2_console *scon)
