@@ -698,9 +698,53 @@ static int sdl2_gl_check_reset_status(struct sdl2_console *scon)
     return -EAGAIN;
 }
 
+static bool is_sdl_context_valid_after_recreation(struct sdl2_console *scon)
+{
+    SDL_SysWMinfo wm_info;
+
+    if (!scon->real_window || !scon->real_renderer)
+        return false;
+
+    /*1, Check if there are any errors in SDL & Wayland */
+    SDL_VERSION(&wm_info.version);
+    if (!SDL_GetWindowWMInfo(scon->real_window, &wm_info))
+        return false;
+
+    if (wm_info.subsystem != SDL_SYSWM_WAYLAND)
+        return false;
+
+    if (wl_display_get_error(wm_info.info.wl.display) != 0)
+        return false;
+
+    if (wl_display_flush(wm_info.info.wl.display) == -1)
+        return false;
+
+    /*2, Check if there are any errors in the GL context */
+    if (scon->opengl) {
+        if (!scon->winctx)
+            return false;
+
+        if (SDL_GL_MakeCurrent(scon->real_window, scon->winctx) < 0) {
+            return false;
+        } else {
+            const char* vendor = (const char*)glGetString(GL_VENDOR);
+
+            if (!vendor)
+                return false;
+
+            if (strcmp(vendor, "AMD"))
+                return false;
+        }
+    }
+
+    return true;
+}
+
 static int sdl2_gl_recovery(struct sdl2_console *scon, uint32_t x, uint32_t y,
                             uint32_t w, uint32_t h)
 {
+    bool success;
+    int num_retries;
     /* 1, Destroy the current contexts and related resources */
 #ifdef CONFIG_VIRGL
     virgl_renderer_destroy_ctx0();
@@ -744,8 +788,28 @@ static int sdl2_gl_recovery(struct sdl2_console *scon, uint32_t x, uint32_t y,
     sdl2_window_destroy(scon);
 
     /* 2, Recreate the contexs and the resources */
-    sdl2_display_reinit();
-    sdl2_window_create(scon);
+    success = false;
+    /*
+     * We will try at most 10 times. But it can also be adjusted based on the
+     * actual situation and experience.
+     */
+    for (num_retries = 0; num_retries < 10; num_retries++) {
+        sdl2_window_create(scon);
+        if (is_sdl_context_valid_after_recreation(scon)) {
+            success = true;
+            break;
+        }
+
+        fprintf(stderr, "warning: sdl2_gl_recovery: recreate SDL ctx failed, to retry(%d)\n", num_retries);
+        sdl2_window_destroy(scon);
+        sdl2_display_reinit();
+    }
+    if (!success) {
+        fprintf(stderr, "sdl2_gl_recovery: fatal error: recreate SDL ctx completely  failed\n");
+        sdl2_window_destroy(scon);
+        return -ENODEV;
+    }
+
     scon->gls = qemu_gl_init_shader();
     if (!scon->gls)
         return -ENOMEM;
