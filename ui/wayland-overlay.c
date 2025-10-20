@@ -594,8 +594,7 @@ void wayland_flush_sub_window(struct wayland_sub_window *sub,
 
         if (sub->framing)
         {
-            if (wl_display_dispatch_queue(sub->wl_console->display, sub->event_queue) < 0)
-            {
+            if (wl_display_dispatch_queue_pending(sub->wl_console->display, sub->event_queue) < 0) {
                 fprintf(stderr, "Failed to dispatch Wayland display queue\n");
                 return;
             }
