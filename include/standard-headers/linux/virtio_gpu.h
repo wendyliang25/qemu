@@ -403,6 +403,7 @@ struct virtio_gpu_config {
 	uint32_t num_scanouts;
 	uint32_t num_capsets;
 	__le32 num_overlays[16]; /* equal to VIRTIO_GPU_MAX_SCANOUTS */
+	uint32_t gpu_clock;
 };
 
 /* simple formats for fbcon/X use */

@@ -32,6 +32,8 @@
 #include "qemu/error-report.h"
 #include "exec/cpu-common.h"
 
+#include <virglrenderer.h>
+
 #define VIRTIO_GPU_VM_VERSION 1
 
 static struct virtio_gpu_simple_resource *
@@ -1676,6 +1678,12 @@ static void
 virtio_gpu_get_config(VirtIODevice *vdev, uint8_t *config)
 {
     VirtIOGPUBase *g = VIRTIO_GPU_BASE(vdev);
+    struct virgl_renderer_host_gpu_info info = {0};
+
+    /* Update GPU clock frequency from host renderer if available */
+    if (virgl_renderer_get_host_gpu_info(&info) == 0) {
+        g->virtio_config.gpu_clock = info.gpu_clock;
+    }
 
     memcpy(config, &g->virtio_config, sizeof(g->virtio_config));
 }
