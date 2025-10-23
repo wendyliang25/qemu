@@ -387,7 +387,7 @@ void qemu_edid_generate(uint8_t *edid, size_t size,
     uint8_t *dta = NULL;
     uint8_t *did = NULL;
     uint32_t width_mm, height_mm;
-    uint32_t refresh_rate = info->refresh_rate ? info->refresh_rate : 75000;
+    uint32_t refresh_rate = info->refresh_rate ? info->refresh_rate : 60000;
     uint32_t dpi = 100; /* if no width_mm/height_mm */
     uint32_t large_screen = 0;
 
