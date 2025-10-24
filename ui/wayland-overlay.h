@@ -5,6 +5,7 @@
 #include "ui/xdg-shell-client.h"
 #include "ui/linux-dmabuf-v1-client.h"
 #include "ui/viewporter-client.h"
+#include "ui/zwp_alpha_blend_control_manager_v1-client.h"
 
 #include "ui/console.h"
 #include "qemu/queue.h"
@@ -49,6 +50,7 @@ struct wayland_sub_window {
     uint32_t scale_height;
     /* Alpha value */
     uint32_t alpha;
+    uint32_t pixel_blend_mode;
     /* Z-order */
     uint32_t zpos;
     bool valid;
@@ -67,6 +69,7 @@ struct wayland_sub_window {
 
     struct wayland_console *wl_console;
     struct wp_viewport *viewport;
+	struct zwp_alpha_blend_control_v1 *abc;
 };
 
 /* Sub-window list head using QLIST */
@@ -94,6 +97,7 @@ struct wayland_console {
     int32_t pointer_last_y;
 
     struct wp_viewporter *viewporter;
+    struct wp_alpha_modifier_v1 *abc_manager;
 };
 
 /* API function declarations */
@@ -106,7 +110,7 @@ void wayland_update_sub_window(struct wayland_console *parent,
                                uint32_t width, uint32_t height,
                                uint32_t src_x, uint32_t src_y,
                                uint32_t src_width, uint32_t src_height,
-                               uint32_t zpos, uint8_t alpha,
+                               uint32_t zpos, uint32_t alpha, uint32_t pixel_blend_mode,
                                uint32_t scale_width, uint32_t scale_height);
 
 struct wayland_sub_window *wayland_create_sub_window(struct wayland_console *parent,

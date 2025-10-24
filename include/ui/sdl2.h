@@ -35,6 +35,7 @@ typedef struct egl_overlay_fb {
     uint32_t height;
     uint32_t id;
     uint32_t alpha;
+    uint32_t pixel_blend_mode;
     uint32_t zpos;
 
     /* position on desktop */

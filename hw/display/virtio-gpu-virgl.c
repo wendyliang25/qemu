@@ -991,6 +991,7 @@ static void virgl_cmd_set_overlay_blob(VirtIOGPU *g,
     vres->overlay_id = so.overlay_id;
     vres->res.zpos = so.zpos;
     vres->res.alpha = so.alpha;
+    vres->res.pixel_blend_mode = so.pixel_blend_mode;
     vres->res.x_coord = so.x_coord;
     vres->res.y_coord = so.y_coord;
     vres->res.num_planes = so.num_planes;

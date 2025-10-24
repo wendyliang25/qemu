@@ -144,6 +144,7 @@ if sdl.found()
       'xdg-shell': 'stable/xdg-shell/xdg-shell.xml',
       'linux-dmabuf-v1': 'stable/linux-dmabuf/linux-dmabuf-v1.xml',
       'viewporter': 'stable/viewporter/viewporter.xml',
+      'zwp_alpha_blend_control_manager_v1': 'unstable/alpha-blend-control/alpha-blend-control-unstable-v1.xml',
     }
 
     foreach name, path : protocols

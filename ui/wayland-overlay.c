@@ -32,6 +32,7 @@
 
 #include "standard-headers/drm/drm_fourcc.h"
 
+#define ALPHA_MAX_UINT16_D 65535.0
 
 static void registry_global(void *data, struct wl_registry *registry,
                             uint32_t id, const char *interface,
@@ -49,6 +50,8 @@ static void registry_global(void *data, struct wl_registry *registry,
         out->seat = wl_registry_bind(registry, id, &wl_seat_interface, seat_ver);
     } else if (strcmp(interface, wp_viewporter_interface.name) == 0) {
          out->viewporter = wl_registry_bind(registry, id, &wp_viewporter_interface, 1);
+    } else if (strcmp(interface, "zwp_alpha_blend_control_manager_v1") == 0) {
+         out->abc_manager = wl_registry_bind(registry, id, &zwp_alpha_blend_control_manager_v1_interface, 1);
     }
 }
 
@@ -621,7 +624,7 @@ void wayland_update_sub_window(struct wayland_console *parent,
                                uint32_t width, uint32_t height,
                                uint32_t src_x, uint32_t src_y,
                                uint32_t src_width, uint32_t src_height,
-                               uint32_t zpos, uint8_t alpha,
+                               uint32_t zpos, uint32_t alpha, uint32_t pixel_blend_mode,
                                uint32_t scale_width, uint32_t scale_height)
 {
     struct wayland_sub_window *sub = wayland_find_sub_window(parent, plane_id);
@@ -652,6 +655,7 @@ void wayland_update_sub_window(struct wayland_console *parent,
     sub->src_width = src_width;
     sub->src_height = src_height;
     sub->alpha = alpha;
+    sub->pixel_blend_mode = pixel_blend_mode;
     sub->zpos = zpos;
     sub->valid = true;
     sub->flush_count = 0;
@@ -661,6 +665,11 @@ void wayland_update_sub_window(struct wayland_console *parent,
 
     if (sub->subsurface) {
         wl_subsurface_set_position(sub->subsurface, x, y);
+    }
+    if (sub->abc) {
+        zwp_alpha_blend_control_v1_set_alpha(
+            sub->abc, wl_fixed_from_double(alpha / ALPHA_MAX_UINT16_D));
+        zwp_alpha_blend_control_v1_set_blend_mode(sub->abc, pixel_blend_mode);
     }
 }
 
@@ -702,6 +711,9 @@ static bool wayland_create_sub_window_resources(struct wayland_console *parent,
         sub->viewport = wp_viewporter_get_viewport(parent->viewporter, sub->surface);
     if (sub->viewport)
         fprintf(stderr, "Warning: Overlay scaling is not supported!\n");
+    if (parent->abc_manager)
+		sub->abc = zwp_alpha_blend_control_manager_v1_get_alpha_blend_control(parent->abc_manager, sub->surface);
+
 
     wl_subsurface_set_position(sub->subsurface_proxy, sub->x, sub->y);
     wl_subsurface_set_sync(sub->subsurface_proxy);
@@ -725,6 +737,9 @@ static void wayland_release_sub_window_resources(struct wayland_sub_window *sub)
 
     if (sub->viewport)
         wp_viewport_destroy(sub->viewport);
+
+    if (sub->abc)
+        zwp_alpha_blend_control_v1_destroy(sub->abc);
 
     if (sub->subsurface) {
         wl_subsurface_destroy(sub->subsurface);

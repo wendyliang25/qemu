@@ -351,6 +351,7 @@ void sdl2_gl_overlay_dmabuf(DisplayChangeListener *dcl, QemuDmaBuf *dmabuf,
         ov->width = dmabuf->width;
         ov->height = dmabuf->height;
         ov->alpha = dmabuf->alpha;
+        ov->pixel_blend_mode = dmabuf->pixel_blend_mode;
         ov->zpos = dmabuf->zpos;
         ov->x_coord = dmabuf->x_coord;
         ov->y_coord = dmabuf->y_coord;
@@ -402,7 +403,7 @@ void sdl2_gl_overlay_dmabuf(DisplayChangeListener *dcl, QemuDmaBuf *dmabuf,
                                   dmabuf->x_coord, dmabuf->y_coord,
                                   dmabuf->width, dmabuf->height,
                                   dmabuf->x, dmabuf->y, dmabuf->width, dmabuf->height,
-                                  dmabuf->zpos, dmabuf->alpha,
+                                  dmabuf->zpos, dmabuf->alpha, dmabuf->pixel_blend_mode,
                                   dmabuf->scale_width, dmabuf->scale_height);
         struct wayland_sub_window *sub = wayland_find_sub_window(scon->wayland_console, id);
         if (!sub) {

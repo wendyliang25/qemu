@@ -70,6 +70,7 @@ struct virtio_gpu_simple_resource {
 
     /* The following props are extended for overlay buffer */
     uint32_t  alpha;
+    uint32_t  pixel_blend_mode;
     /*
      * Z-position (zpos) is used to calculate occlusion relationships between
      * the main window(scanout buffer) and other overlay buffers

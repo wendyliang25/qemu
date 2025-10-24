@@ -225,6 +225,7 @@ static VGPUDMABuf
         dmabuf->overlay_id = overlay_id;
         dmabuf->buf.zpos = res->zpos;
         dmabuf->buf.alpha = res->alpha;
+        dmabuf->buf.pixel_blend_mode = res->pixel_blend_mode;
         dmabuf->buf.x_coord = res->x_coord;
         dmabuf->buf.y_coord = res->y_coord;
         dmabuf->buf.scale_width = res->scale_width;
