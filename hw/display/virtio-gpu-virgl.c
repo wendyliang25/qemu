@@ -242,13 +242,13 @@ static void virgl_cmd_context_destroy(VirtIOGPU *g,
 }
 
 static void virtio_gpu_rect_update(VirtIOGPU *g, int idx, int x, int y,
-                                int width, int height)
+                                   int width, int height, uint64_t fence_id)
 {
     if (!g->parent_obj.scanout[idx].con) {
         return;
     }
 
-    dpy_gl_update(g->parent_obj.scanout[idx].con, x, y, width, height);
+    return dpy_gl_update_fenced(g->parent_obj.scanout[idx].con, x, y, width, height, fence_id);
 }
 
 static void
@@ -292,7 +292,8 @@ static void virgl_cmd_resource_flush(VirtIOGPU *g,
         if (g->parent_obj.scanout[i].resource_id != rf.resource_id) {
             continue;
         }
-        virtio_gpu_rect_update(g, i, rf.r.x, rf.r.y, rf.r.width, rf.r.height);
+        virtio_gpu_rect_update(g, i, rf.r.x, rf.r.y, rf.r.width, rf.r.height,
+                               cmd->cmd_hdr.fence_id);
     }
 }
 

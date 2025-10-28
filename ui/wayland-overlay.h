@@ -98,6 +98,11 @@ struct wayland_console {
 
     struct wp_viewporter *viewporter;
     struct zwp_alpha_blend_control_manager_v1 *abc_manager;
+
+    /* Main surface frame callback for scanout fence tracking */
+    struct wl_callback *main_frame_callback;
+    uint64_t main_fence_id;
+    bool main_framing;
 };
 
 /* API function declarations */
@@ -147,5 +152,8 @@ struct wayland_console *wayland_console_init(void *parent_console, struct wl_dis
 void wayland_console_destroy(struct wayland_console *console);
 
 bool wayland_is_alive(struct wayland_console *console);
+
+/* Frame callback listener for main surface fence tracking */
+extern const struct wl_callback_listener main_frame_listener;
 
 #endif /* WAYLAND_OVERLAY_H */

@@ -352,12 +352,22 @@ static void sub_window_flush_done(struct wayland_sub_window *sub)
     }
 }
 
+static void main_surface_flush_done(struct wayland_console *console)
+{
+    if (console->main_fence_id != 0) {
+        struct sdl2_console *sdlc = console->parent_console;
+        graphic_hw_gl_flush_done(sdlc->dcl.con, console->main_fence_id);
+        console->main_fence_id = 0;
+    }
+}
+
 static void commit_buffer(struct wayland_sub_window *sub, uint64_t fence_id);
 
 static void frame_handle_done(void *data, struct wl_callback *cb, uint32_t time)
 {
     struct wayland_sub_window *sub = data;
-    if (sub->valid) {
+
+    if (sub && sub->valid) {
         wl_callback_destroy(sub->frame_callback);
         sub->frame_callback = NULL;
         sub->framing = false;
@@ -368,6 +378,23 @@ static void frame_handle_done(void *data, struct wl_callback *cb, uint32_t time)
 
 static const struct wl_callback_listener frame_listener = {
     .done = frame_handle_done,
+};
+
+static void main_frame_handle_done(void *data, struct wl_callback *cb, uint32_t time)
+{
+    struct wayland_console *console = data;
+
+    if (console) {
+        wl_callback_destroy(console->main_frame_callback);
+        console->main_frame_callback = NULL;
+        console->main_framing = false;
+
+        main_surface_flush_done(console);
+    }
+}
+
+const struct wl_callback_listener main_frame_listener = {
+    .done = main_frame_handle_done,
 };
 
 static void buffer_release_handler(void *data, struct wl_buffer *wl_buffer)
@@ -405,6 +432,11 @@ struct wayland_console *wayland_console_init(void *parent_console,
     console->pointer_grab = false;
     console->pointer_last_x = 0;
     console->pointer_last_y = 0;
+
+    /* Initialize main surface frame callback fields */
+    console->main_frame_callback = NULL;
+    console->main_fence_id = 0;
+    console->main_framing = false;
 
     struct wl_registry *registry = wl_display_get_registry(display);
     if(!registry) {
@@ -449,6 +481,12 @@ void wayland_console_destroy(struct wayland_console *console)
 
     if (!console) {
         return;
+    }
+
+    /* Clean up main surface frame callback */
+    if (console->main_frame_callback) {
+        wl_callback_destroy(console->main_frame_callback);
+        console->main_frame_callback = NULL;
     }
 
     if (console->pointer) {
@@ -572,9 +610,13 @@ static void commit_buffer(struct wayland_sub_window *sub, uint64_t fence_id)
 
                 sub->fence = fence_id;
                 sub->frame_callback = wl_surface_frame(sub->surface);
+                // sub->frame_callback = wl_surface_frame(sub->wl_console->main_surface);
                 wl_callback_add_listener(sub->frame_callback, &frame_listener, sub);
 
                 sub->framing = true;
+
+                wl_surface_commit(sub->surface_proxy);
+                // wl_display_flush(sub->wl_console->display);
             }
         }
         sub->buffer_queued = false;

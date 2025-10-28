@@ -280,7 +280,7 @@ void graphic_hw_gl_block(QemuConsole *con, bool block)
 
 void graphic_hw_gl_flush_done(QemuConsole *con, uint64_t fence_id)
 {
-    if (con && con->hw_ops->gl_flush_done) {
+    if (con && con->hw_ops->gl_flush_done && fence_id > 0) {
         con->hw_ops->gl_flush_done(con->hw, fence_id);
     } else {
         fprintf(stderr, "graphic_hw_gl_flush_done: no gl_flush_done handler\n");
@@ -2204,7 +2204,8 @@ void dpy_gl_release_dmabuf(QemuConsole *con,
 }
 
 void dpy_gl_update(QemuConsole *con,
-                   uint32_t x, uint32_t y, uint32_t w, uint32_t h)
+                   uint32_t x, uint32_t y,
+                   uint32_t w, uint32_t h)
 {
     DisplayState *s = con->ds;
     DisplayChangeListener *dcl;
@@ -2228,9 +2229,38 @@ void dpy_gl_update(QemuConsole *con,
     graphic_hw_gl_block(con, false);
 }
 
-void dpy_gl_update_overlay(QemuConsole *con, uint32_t id,
-                           uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                           uint64_t fence_id)
+int dpy_gl_update_fenced(QemuConsole *con,
+                          uint32_t x, uint32_t y,
+                          uint32_t w, uint32_t h,
+                          uint64_t fence_id)
+{
+    DisplayState *s = con->ds;
+    DisplayChangeListener *dcl;
+
+    assert(con->gl);
+
+    con->gl_update_backup.x = x;
+    con->gl_update_backup.y = y;
+    con->gl_update_backup.w = w;
+    con->gl_update_backup.h = h;
+
+    graphic_hw_gl_block(con, true);
+    int ret = 0;
+    QLIST_FOREACH(dcl, &s->listeners, next) {
+        if (con != (dcl->con ? dcl->con : active_console)) {
+            continue;
+        }
+        if (dcl->ops->dpy_gl_update_fenced) {
+            ret = dcl->ops->dpy_gl_update_fenced(dcl, x, y, w, h, fence_id);
+        }
+    }
+    graphic_hw_gl_block(con, false);
+    return ret;
+}
+
+int dpy_gl_update_overlay(QemuConsole *con, uint32_t id,
+                          uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                          uint64_t fence_id)
 {
     DisplayState *s = con->ds;
     DisplayChangeListener *dcl;

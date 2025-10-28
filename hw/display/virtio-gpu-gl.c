@@ -65,13 +65,12 @@ static void virtio_gpu_gl_flush_done(VirtIOGPUBase *b,
 
     struct virtio_gpu_ctrl_command *cmd, *tmp;
     QTAILQ_FOREACH_SAFE(cmd, &g->flush_fenceq, next, tmp) {
-        if (cmd->cmd_hdr.fence_id <= fence_id) {
+        if (cmd->cmd_hdr.fence_id == fence_id) {
             trace_virtio_gpu_gl_flush_done_fence_found(fence_id, g->inflight_flush);
             virtio_gpu_ctrl_response_nodata(g, cmd, VIRTIO_GPU_RESP_OK_NODATA);
             QTAILQ_REMOVE(&g->flush_fenceq, cmd, next);
             g_free(cmd);
             g->inflight_flush--;
-            break;
         }
     }
 }

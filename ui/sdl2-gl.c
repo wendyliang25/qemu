@@ -164,7 +164,8 @@ void sdl2_gl_redraw(struct sdl2_console *scon)
     if (scon->scanout_mode) {
         /* sdl2_gl_scanout_flush actually only care about
          * the first argument. */
-        return sdl2_gl_scanout_flush(&scon->dcl, 0, 0, 0, 0);
+        sdl2_gl_scanout_flush(&scon->dcl, 0, 0, 0, 0);
+        return;
     }
     if (scon->surface) {
         sdl2_gl_render_surface(scon);
@@ -573,6 +574,13 @@ static void sdl2_gl_real_scanout_flush(DisplayChangeListener *dcl)
 void sdl2_gl_scanout_flush(DisplayChangeListener *dcl,
                            uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 {
+    sdl2_gl_scanout_flush_fenced(dcl, x, y, w, h, 0);
+}
+
+int sdl2_gl_scanout_flush_fenced(DisplayChangeListener *dcl,
+                                 uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                                 uint64_t fence_id)
+{
     struct sdl2_console *scon = container_of(dcl, struct sdl2_console, dcl);
 
     scon->x = x;
@@ -580,12 +588,26 @@ void sdl2_gl_scanout_flush(DisplayChangeListener *dcl,
     scon->w = w;
     scon->h = h;
 
-    if ( scon->wayland_console == NULL || scon->wayland_console->num_sub_windows == 0) {
-        sdl2_gl_real_scanout_flush(dcl);
+    /* Register main surface frame callback for fence tracking */
+    if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_WAYLAND &&
+        scon->wayland_console && fence_id != 0) {
+        struct wayland_console *wlc = scon->wayland_console;
+
+        /* Clean up previous callback if exists */
+        if (wlc->main_frame_callback) {
+            wl_callback_destroy(wlc->main_frame_callback);
+        }
+
+        wlc->main_fence_id = fence_id;
+        wlc->main_framing = true;
+
+        wlc->main_frame_callback = wl_surface_frame(wlc->main_surface);
+        wl_callback_add_listener(wlc->main_frame_callback, &main_frame_listener, wlc);
+
     }
 
+    sdl2_gl_real_scanout_flush(dcl);
     sdl2_gl_subwin_flush_sync(scon);
-
 }
 
 void sdl2_gl_overlay_flush(DisplayChangeListener *dcl, uint32_t id,
@@ -668,11 +690,9 @@ void sdl2_gl_overlay_flush(DisplayChangeListener *dcl, uint32_t id,
         return;
     }
 
-    scon->wayland_console->num_flushed++;
-    if( scon->wayland_console->num_flushed >= scon->wayland_console->num_sub_windows ) {
-        sdl2_gl_real_scanout_flush(dcl);
-        scon->wayland_console->num_flushed = 0;
-    }
+    sdl2_gl_real_scanout_flush(dcl);
+
+    return ret;
 }
 
 void sdl2_gl_set_hdcp(DisplayChangeListener *dcl, uint32_t type, uint32_t mode)
