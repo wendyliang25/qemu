@@ -26,11 +26,18 @@
 #include "ui/wayland-overlay.h"
 #include "ui/console.h"
 #include "qemu/queue.h"
+#include "qemu/main-loop.h"
 
 #include "ui/sdl2.h"
 #include "ui/input.h"
 
 #include "standard-headers/drm/drm_fourcc.h"
+
+#include <sys/eventfd.h>
+#include <poll.h>
+#include <fcntl.h>
+#include <time.h>
+#include <errno.h>
 
 #define ALPHA_MAX_UINT16_D 65535.0
 
@@ -411,6 +418,102 @@ static const struct wl_buffer_listener buffer_listener = {
     .release = buffer_release_handler
 };
 
+/*
+ * Wayland event handler - called by QEMU main loop when Wayland fd is readable
+ * This runs in the main QEMU thread, so all operations are thread-safe.
+ * Replaces the previous pthread-based event loop.
+ */
+static void wayland_fd_read_handler(void *opaque)
+{
+    struct wayland_console *console = opaque;
+    int ret;
+
+    if (!console || !console->display) {
+        return;
+    }
+
+    /* Dispatch any pending events first (without reading) */
+    ret = wl_display_dispatch_pending(console->display);
+    if (ret < 0) {
+        fprintf(stderr, "wayland_fd_read: dispatch_pending failed: %s\n", strerror(errno));
+        return;
+    }
+
+    /* Prepare to read from the Wayland fd */
+    ret = wl_display_prepare_read(console->display);
+    if (ret != 0) {
+        /* Events were queued, dispatch them and retry */
+        wl_display_dispatch_pending(console->display);
+        return;
+    }
+
+    /* Read events from the fd (QEMU main loop already determined fd is readable) */
+    ret = wl_display_read_events(console->display);
+    if (ret < 0) {
+        fprintf(stderr, "wayland_fd_read: read_events failed: %s\n", strerror(errno));
+        return;
+    }
+
+    /* Dispatch the newly read events (frame callbacks will be triggered here) */
+    ret = wl_display_dispatch_pending(console->display);
+    if (ret < 0) {
+        fprintf(stderr, "wayland_fd_read: final dispatch failed: %s\n", strerror(errno));
+    }
+
+    /* Flush any pending requests to the compositor */
+    wl_display_flush(console->display);
+}
+
+/*
+ * Optional: Write handler for when we have data to send to Wayland
+ * This is called when the Wayland fd becomes writable and we have pending data
+ */
+static void wayland_fd_write_handler(void *opaque)
+{
+    struct wayland_console *console = opaque;
+
+    if (!console || !console->display) {
+        return;
+    }
+
+    /* Flush pending requests */
+    int ret = wl_display_flush(console->display);
+    if (ret < 0 && errno != EAGAIN) {
+        fprintf(stderr, "wayland_fd_write: flush failed: %s\n", strerror(errno));
+        return;
+    }
+
+    /* If all data was sent, we can stop monitoring for write */
+    if (ret >= 0) {
+        qemu_set_fd_handler(console->wl_fd, wayland_fd_read_handler, NULL, console);
+    }
+}
+
+/*
+ * Public helper to flush Wayland requests from any context
+ * This ensures requests are sent to the compositor.
+ * If flush would block (EAGAIN), enables write monitoring to retry later.
+ */
+void wayland_display_flush(struct wayland_console *console)
+{
+    int ret;
+
+    if (!console || !console->display) {
+        return;
+    }
+
+    ret = wl_display_flush(console->display);
+
+    /* If flush would block, enable write monitoring */
+    if (ret < 0 && errno == EAGAIN) {
+        /* Register write handler to flush when fd becomes writable */
+        qemu_set_fd_handler(console->wl_fd, wayland_fd_read_handler,
+                           wayland_fd_write_handler, console);
+    } else if (ret < 0) {
+        fprintf(stderr, "wayland_display_flush: failed: %s\n", strerror(errno));
+    }
+}
+
 struct wayland_console *wayland_console_init(void *parent_console,
                                              struct wl_display *display,
                                              struct wl_surface *main_surface)
@@ -437,6 +540,15 @@ struct wayland_console *wayland_console_init(void *parent_console,
     console->main_frame_callback = NULL;
     console->main_fence_id = 0;
     console->main_framing = false;
+
+    /* Initialize Wayland event handling via QEMU main loop fd handler */
+    console->wl_fd = wl_display_get_fd(display);
+    console->wl_fd_registered = false;
+    if (console->wl_fd < 0) {
+        fprintf(stderr, "[wayland] Failed to get Wayland display fd\n");
+        g_free(console);
+        return NULL;
+    }
 
     struct wl_registry *registry = wl_display_get_registry(display);
     if(!registry) {
@@ -467,8 +579,16 @@ struct wayland_console *wayland_console_init(void *parent_console,
         wl_seat_add_listener(console->seat, &seat_listener, console);
         wl_display_roundtrip(display);
     } else {
-        fprintf(stderr, "[wayland] Wayland input no wl_seat bound");
+        fprintf(stderr, "[wayland] Wayland input no wl_seat bound\n");
     }
+
+    /* Register Wayland fd with QEMU main loop for event-driven processing
+     * This replaces the pthread-based event loop for thread safety.
+     * The read handler will be called automatically when Wayland events arrive. */
+    qemu_set_fd_handler(console->wl_fd, wayland_fd_read_handler, NULL, console);
+    console->wl_fd_registered = true;
+
+    fprintf(stderr, "[wayland] console initialized with fd handler (fd=%d)\n", console->wl_fd);
 
     return console;
 }
@@ -481,6 +601,12 @@ void wayland_console_destroy(struct wayland_console *console)
 
     if (!console) {
         return;
+    }
+
+    /* Unregister Wayland fd from QEMU main loop */
+    if (console->wl_fd_registered) {
+        qemu_set_fd_handler(console->wl_fd, NULL, NULL, NULL);
+        console->wl_fd_registered = false;
     }
 
     /* Clean up main surface frame callback */

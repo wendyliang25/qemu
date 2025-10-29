@@ -99,6 +99,10 @@ struct wayland_console {
     struct wp_viewporter *viewporter;
     struct zwp_alpha_blend_control_manager_v1 *abc_manager;
 
+    /* Wayland event handling via QEMU main loop fd handler (no pthread) */
+    int wl_fd;                          /* Wayland display file descriptor */
+    bool wl_fd_registered;              /* Whether fd handler is registered */
+
     /* Main surface frame callback for scanout fence tracking */
     struct wl_callback *main_frame_callback;
     uint64_t main_fence_id;
@@ -152,6 +156,9 @@ struct wayland_console *wayland_console_init(void *parent_console, struct wl_dis
 void wayland_console_destroy(struct wayland_console *console);
 
 bool wayland_is_alive(struct wayland_console *console);
+
+/* Flush Wayland display requests to compositor */
+void wayland_display_flush(struct wayland_console *console);
 
 /* Frame callback listener for main surface fence tracking */
 extern const struct wl_callback_listener main_frame_listener;

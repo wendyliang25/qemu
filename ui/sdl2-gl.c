@@ -563,7 +563,7 @@ static void sdl2_gl_real_scanout_flush(DisplayChangeListener *dcl)
         }
 
         wl_surface_commit(scon->wayland_console->main_surface);
-        wl_display_flush(scon->wayland_console->display);
+        wayland_display_flush(scon->wayland_console);
     }
 
     SDL_GL_SwapWindow(scon->real_window);
@@ -790,12 +790,12 @@ int sdl2_gl_flush_planes_batch(DisplayChangeListener *dcl,
          * This flushes both the subsurfaces (committed in Phase 1) and
          * the main surface (committed by SDL_GL_SwapWindow above) */
         if (scon->wayland_console) {
-            wl_display_flush(scon->wayland_console->display);
+            wayland_display_flush(scon->wayland_console);
         }
     } else {
         /* No primary plane, just flush overlays to Wayland */
         if (overlay_count > 0 && scon->wayland_console) {
-            wl_display_flush(scon->wayland_console->display);
+            wayland_display_flush(scon->wayland_console);
         }
     }
 
