@@ -134,7 +134,7 @@ void wayland_clean_invalid_sub_windows(struct wayland_console *parent);
 void wayland_update_dmabuf(struct wayland_sub_window *sub,
                            QemuDmaBuf *dmabuf);
 /* Used by sdl2_gl_overlay_flush */
-void wayland_flush_sub_window(struct wayland_sub_window *sub,
+int wayland_flush_sub_window(struct wayland_sub_window *sub,
                              uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                              uint64_t fence_id);
 

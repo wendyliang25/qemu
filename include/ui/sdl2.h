@@ -165,11 +165,12 @@ void sdl2_gl_scanout_flush(DisplayChangeListener *dcl,
 int sdl2_gl_scanout_flush_fenced(DisplayChangeListener *dcl,
                                   uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                                   uint64_t fence_id);
-                           uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                           uint64_t fence_id);
 int sdl2_gl_overlay_flush(DisplayChangeListener *dcl, uint32_t id,
                           uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                           uint64_t fence_id);
+int sdl2_gl_flush_planes_batch(DisplayChangeListener *dcl,
+                               QemuPlaneFlushInfo *planes, uint32_t count,
+                               uint64_t fence_id);
 void sdl2_gl_scanout_dmabuf(DisplayChangeListener *dcl,
                             QemuDmaBuf *dmabuf);
 void sdl2_gl_overlay_dmabuf(DisplayChangeListener *dcl, QemuDmaBuf *dmabuf,

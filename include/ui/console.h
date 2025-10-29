@@ -212,6 +212,22 @@ typedef struct QemuDmaBuf {
     uint32_t  num_planes;
 } QemuDmaBuf;
 
+typedef enum {
+    QEMU_PLANE_TYPE_PRIMARY,
+    QEMU_PLANE_TYPE_OVERLAY,
+} QemuPlaneType;
+
+typedef struct QemuPlaneFlushInfo {
+    QemuPlaneType type;
+    uint32_t scanout_id;      /* For primary planes */
+    uint32_t overlay_id;      /* For overlay planes */
+    uint32_t resource_id;
+    uint32_t x;
+    uint32_t y;
+    uint32_t width;
+    uint32_t height;
+} QemuPlaneFlushInfo;
+
 enum display_scanout {
     SCANOUT_NONE,
     SCANOUT_SURFACE,
@@ -307,9 +323,13 @@ typedef struct DisplayChangeListenerOps {
                           uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                           uint64_t fence_id);
     /* optional */
-    void (*dpy_gl_update_overlay)(DisplayChangeListener *dcl,uint32_t id,
-                                  uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                                  uint64_t fence_id);
+    int (*dpy_gl_update_overlay)(DisplayChangeListener *dcl, uint32_t id,
+                                 uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                                 uint64_t fence_id);
+    /* optional - batch flush all planes (primary + overlays) with individual rects */
+    int (*dpy_gl_flush_planes_batch)(DisplayChangeListener *dcl,
+                                     QemuPlaneFlushInfo *planes, uint32_t count,
+                                     uint64_t fence_id);
     /* optional */
     void (*dpy_gl_set_hdcp)(DisplayChangeListener *dcl, uint32_t type, uint32_t mode);
 
@@ -422,6 +442,9 @@ int dpy_gl_update_fenced(QemuConsole *con,
 int dpy_gl_update_overlay(QemuConsole *con, uint32_t id,
                           uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                           uint64_t fence_id);
+int dpy_gl_flush_planes_batch(QemuConsole *con,
+                               QemuPlaneFlushInfo *planes, uint32_t count,
+                               uint64_t fence_id);
 void dpy_gl_set_hdcp(QemuConsole *con, uint32_t type, uint32_t mode);
 void dpy_set_dpms(QemuConsole *con, qdpms_enum level);
 void dpy_set_suspend_state(QemuConsole *con, bool suspend);

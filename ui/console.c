@@ -2264,6 +2264,8 @@ int dpy_gl_update_overlay(QemuConsole *con, uint32_t id,
 {
     DisplayState *s = con->ds;
     DisplayChangeListener *dcl;
+    int ret = 0;
+    bool handled = false;
 
     assert(con->gl);
 
@@ -2273,11 +2275,54 @@ int dpy_gl_update_overlay(QemuConsole *con, uint32_t id,
             continue;
         }
         if (dcl->ops->dpy_gl_update_overlay) {
-            dcl->ops->dpy_gl_update_overlay(dcl, id, x, y, w, h,
-                                            fence_id);
+            handled = true;
+            ret = dcl->ops->dpy_gl_update_overlay(dcl, id, x, y, w, h,
+                                                  fence_id);
+            if (ret < 0) {
+                break;
+            }
         }
     }
     graphic_hw_gl_block(con, false);
+
+    if (!handled) {
+        return -ENOSYS;
+    }
+
+    return ret;
+}
+
+int dpy_gl_flush_planes_batch(QemuConsole *con,
+                              QemuPlaneFlushInfo *planes, uint32_t count,
+                              uint64_t fence_id)
+{
+    DisplayState *s = con->ds;
+    DisplayChangeListener *dcl;
+    int ret = 0;
+    bool handled = false;
+
+    assert(con->gl);
+
+    graphic_hw_gl_block(con, true);
+    QLIST_FOREACH(dcl, &s->listeners, next) {
+        if (con != (dcl->con ? dcl->con : active_console)) {
+            continue;
+        }
+        if (dcl->ops->dpy_gl_flush_planes_batch) {
+            handled = true;
+            ret = dcl->ops->dpy_gl_flush_planes_batch(dcl, planes, count, fence_id);
+            if (ret < 0) {
+                break;
+            }
+        }
+    }
+    graphic_hw_gl_block(con, false);
+
+    if (!handled) {
+        return -ENOSYS;
+    }
+
+    return ret;
 }
 
 void dpy_gl_set_hdcp(QemuConsole *con, uint32_t type, uint32_t mode)

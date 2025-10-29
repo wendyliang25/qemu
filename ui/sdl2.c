@@ -1280,6 +1280,7 @@ static void sdl2_enable_dmabuf_scanout(void)
     dcl_gl_ops.dpy_gl_scanout_dmabuf = sdl2_gl_scanout_dmabuf;
     dcl_gl_ops.dpy_gl_overlay_dmabuf = sdl2_gl_overlay_dmabuf;
     dcl_gl_ops.dpy_gl_update_overlay = sdl2_gl_overlay_flush;
+    dcl_gl_ops.dpy_gl_flush_planes_batch = sdl2_gl_flush_planes_batch;
     dcl_gl_ops.dpy_gl_release_dmabuf = sdl2_gl_release_dmabuf;
     dcl_gl_ops.dpy_has_dmabuf        = sdl2_gl_has_dmabuf;
     dcl_gl_ops.dpy_gl_update_fenced  = sdl2_gl_scanout_flush_fenced;

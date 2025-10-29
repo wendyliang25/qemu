@@ -626,38 +626,39 @@ static void commit_buffer(struct wayland_sub_window *sub, uint64_t fence_id)
 }
 
 
-void wayland_flush_sub_window(struct wayland_sub_window *sub,
-                              uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                              uint64_t fence_id)
+int wayland_flush_sub_window(struct wayland_sub_window *sub,
+                             uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                             uint64_t fence_id)
 {
-    if (!wayland_is_valid_subwindow(sub)) {
-        return;
+    if (!sub) {
+        return -ENOENT;
     }
 
-    if (sub->valid) {
-        wl_subsurface_set_position(sub->subsurface_proxy, sub->x, sub->y);
-
-        if (sub->framing)
-        {
-            if (wl_display_dispatch_queue_pending(sub->wl_console->display, sub->event_queue) < 0) {
-                fprintf(stderr, "Failed to dispatch Wayland display queue\n");
-                return;
-            }
-            if (sub->framing)
-                return;
-        }
-
-        if (!sub->framing) {
-            commit_buffer(sub, fence_id);
-        } else {
-            sub_window_flush_done(sub);
-            fprintf(stderr, "[wayland] flush_sub_window %d already framing\n",
-                    sub->dmabuf->fd);
-        }
+    if (!wayland_is_valid_subwindow(sub) || !sub->valid) {
+        return -EINVAL;
     }
 
-    // wl_display_flush(sub->wl_console->display);
     sub->flush_count = 0;
+
+    wl_subsurface_set_position(sub->subsurface_proxy, sub->x, sub->y);
+
+    if (sub->framing) {
+        if (wl_display_dispatch_queue_pending(sub->wl_console->display,
+                                      sub->event_queue) < 0) {
+            fprintf(stderr, "Failed to dispatch Wayland display queue\n");
+            return -EIO;
+        }
+    }
+
+    if (!sub->framing) {
+        commit_buffer(sub, fence_id);
+    } else {
+        fprintf(stderr, "[wayland] flush_sub_window %d already framing\n",
+                sub->dmabuf->fd);
+        return -EAGAIN;
+    }
+    // wl_display_flush(sub->wl_console->display);
+    return 0;
 }
 
 void wayland_update_sub_window(struct wayland_console *parent,

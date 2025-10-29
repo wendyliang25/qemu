@@ -589,8 +589,15 @@ int sdl2_gl_scanout_flush_fenced(DisplayChangeListener *dcl,
     scon->h = h;
 
     /* Register main surface frame callback for fence tracking */
-    if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_WAYLAND &&
-        scon->wayland_console && fence_id != 0) {
+    if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_WAYLAND && fence_id != 0) {
+
+        if (!scon->wayland_console) {
+            sdl2_init_wayland_overlay(scon);
+            if (!scon->wayland_console) {
+                fprintf(stderr, "sdl2_gl_overlay_dmabuf: wayland console not available\n");
+                return -ENODEV;
+            }
+        }
         struct wayland_console *wlc = scon->wayland_console;
 
         /* Clean up previous callback if exists */
@@ -608,13 +615,16 @@ int sdl2_gl_scanout_flush_fenced(DisplayChangeListener *dcl,
 
     sdl2_gl_real_scanout_flush(dcl);
     sdl2_gl_subwin_flush_sync(scon);
+    return 0;
 }
 
-void sdl2_gl_overlay_flush(DisplayChangeListener *dcl, uint32_t id,
-                           uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                           uint64_t fence_id)
+int sdl2_gl_overlay_flush(DisplayChangeListener *dcl, uint32_t id,
+                          uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                          uint64_t fence_id)
 {
     struct sdl2_console *scon = container_of(dcl, struct sdl2_console, dcl);
+    int ret = 0;
+
     assert(scon->opengl);
     if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_BLIT){
 
@@ -623,20 +633,20 @@ void sdl2_gl_overlay_flush(DisplayChangeListener *dcl, uint32_t id,
         int ww, wh;
 
         if (!scon->scanout_mode) {
-            return;
+            return -EACCES;
         }
 
         ov_slot = sdl2_gl_find_overlay_by_id(scon, id);
         if (ov_slot < 0) {
             fprintf(stderr, "invalid overlay id=%d\n", id);
-            return;
+            return -ENOENT;
         }
 
         ov = &scon->guest_overlay_fbs[ov_slot];
         assert(ov->valid);
 
         if (!ov->fb.framebuffer) {
-            return;
+            return -EINVAL;
         }
 
         /* TODO, only process x/y/w/h, while not the whole overlay FB */
@@ -655,10 +665,10 @@ void sdl2_gl_overlay_flush(DisplayChangeListener *dcl, uint32_t id,
         if (!sub || !sub->window) {
             fprintf(stderr,"sdl2_gl_overlay_flush: sub-window not found for plane %u\n",
                     id);
-            return;
+            return -ENOENT;
         }
         if (!sub->guest_fb.framebuffer) {
-            return;
+            return -EINVAL;
         }
 
         sub->flush_count=0;
@@ -674,23 +684,120 @@ void sdl2_gl_overlay_flush(DisplayChangeListener *dcl, uint32_t id,
     } else if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_WAYLAND) {
         if (!scon->wayland_console) {
             fprintf(stderr, "sdl2_gl_overlay_flush: wayland console not initialized\n");
-            return;
+            return -ENODEV;
         }
 
         struct wayland_sub_window *sub = wayland_find_sub_window(scon->wayland_console, id);
         if (!sub) {
             fprintf(stderr, "sdl2_gl_overlay_flush: wayland sub-window not found for plane %u\n", id);
-            return;
+            return -ENOENT;
         }
 
         sub->flush_count = 0;
-        wayland_flush_sub_window(sub, x, y, w, h, fence_id);
+        ret = wayland_flush_sub_window(sub, x, y, w, h, fence_id);
+        if (ret < 0) {
+            return ret;
+        }
     } else {
         fprintf(stderr, "sdl2_gl_overlay_flush: type %d not supported\n", scon->present_type);
-        return;
+        return -ENOTSUP;
     }
 
-    sdl2_gl_real_scanout_flush(dcl);
+    // sdl2_gl_real_scanout_flush(dcl);
+
+    return ret;
+}
+
+int sdl2_gl_flush_planes_batch(DisplayChangeListener *dcl,
+                               QemuPlaneFlushInfo *planes, uint32_t count,
+                               uint64_t fence_id)
+{
+    struct sdl2_console *scon = container_of(dcl, struct sdl2_console, dcl);
+    struct wayland_sub_window *sub;
+    const QemuPlaneFlushInfo *primary_plane = NULL;
+    int ret = 0;
+    int i;
+    int primary_count = 0;
+    int overlay_count = 0;
+
+    assert(scon->opengl);
+
+    if (scon->present_type != SDL2_OVERLAY_PRESENT_TYPE_WAYLAND) {
+        fprintf(stderr, "sdl2_gl_flush_planes_batch: only supported for Wayland present type\n");
+        return -ENOTSUP;
+    }
+
+    if (!scon->wayland_console) {
+        fprintf(stderr, "sdl2_gl_flush_planes_batch: wayland console not initialized\n");
+        return -ENODEV;
+    }
+
+    /* Phase 1: Process all overlay planes first (subsurfaces)
+     * According to Wayland best practices, subsurfaces should be committed before the main surface */
+    for (i = 0; i < count; i++) {
+        const QemuPlaneFlushInfo *plane = &planes[i];
+
+        if (plane->type == QEMU_PLANE_TYPE_PRIMARY) {
+            /* Save primary plane info for later processing */
+            if (!primary_plane) {
+                primary_plane = plane;
+                primary_count++;
+            } else {
+                fprintf(stderr, "sdl2_gl_flush_planes_batch: multiple primary planes not supported\n");
+            }
+
+        } else if (plane->type == QEMU_PLANE_TYPE_OVERLAY) {
+            /* Process overlay immediately */
+            overlay_count++;
+
+            sub = wayland_find_sub_window(scon->wayland_console, plane->overlay_id);
+            if (!sub) {
+                fprintf(stderr, "sdl2_gl_flush_planes_batch: overlay id=%u not found\n",
+                        plane->overlay_id);
+                continue;
+            }
+
+
+            /* Commit overlay subsurface using existing Wayland function
+             * Note: wayland_flush_sub_window does NOT call wl_display_flush */
+            ret = wayland_flush_sub_window(sub, plane->x, plane->y,
+                                          plane->width, plane->height,
+                                          fence_id);
+            if (ret < 0) {
+                fprintf(stderr, "sdl2_gl_flush_planes_batch: overlay id=%u flush failed: %d\n",
+                        plane->overlay_id, ret);
+                /* Continue with other planes even if one fails */
+            }
+        }
+    }
+
+    /* Phase 2: Process primary plane (main surface) after all overlays
+     * This follows Wayland's z-order commit convention: subsurfaces first, then parent surface */
+    if (primary_plane) {
+        /* Use existing primary flush logic which handles:
+         * - GL context switching
+         * - Framebuffer blit
+         * - SDL_GL_SwapWindow (which calls wl_surface_commit on main surface)
+         * - Fence tracking with frame callback */
+        ret = sdl2_gl_scanout_flush_fenced(dcl, primary_plane->x, primary_plane->y,
+                                          primary_plane->width, primary_plane->height,
+                                          fence_id);
+        if (ret < 0) {
+            fprintf(stderr, "sdl2_gl_flush_planes_batch: primary plane flush failed: %d\n", ret);
+        }
+
+        /* Critical: Unified wl_display_flush for all committed surfaces
+         * This flushes both the subsurfaces (committed in Phase 1) and
+         * the main surface (committed by SDL_GL_SwapWindow above) */
+        if (scon->wayland_console) {
+            wl_display_flush(scon->wayland_console->display);
+        }
+    } else {
+        /* No primary plane, just flush overlays to Wayland */
+        if (overlay_count > 0 && scon->wayland_console) {
+            wl_display_flush(scon->wayland_console->display);
+        }
+    }
 
     return ret;
 }
