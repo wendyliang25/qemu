@@ -132,12 +132,92 @@ void egl_fb_setup_new_tex(egl_fb *fb, int width, int height)
     egl_fb_setup_for_tex(fb, width, height, texture, true);
 }
 
+void egl_fb_blit_with_pos(egl_fb *dst, egl_fb *src, bool flip, uint32_t x_coord,
+                         uint32_t y_coord, uint32_t w_pos, uint32_t h_pos)
+{
+    if (!dst || !src) {
+        return;
+    }
+    if (dst->framebuffer == 0 && src->framebuffer == 0) {
+        return;
+    }
+
+    GLuint x1 = 0;
+    GLuint y1 = 0;
+    GLuint x2, y2;
+    GLuint w = src->width;
+    GLuint h = src->height;
+    GLuint dst_x1, dst_x2, dst_y1, dst_y2;
+
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, src->framebuffer);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, dst->framebuffer);
+    glViewport(0, 0, dst->width, dst->height);
+
+    if (src->dmabuf) {
+        x1 = src->dmabuf->x;
+        y1 = src->dmabuf->y;
+        w = src->dmabuf->scanout_width;
+        h = src->dmabuf->scanout_height;
+    }
+
+    if (w_pos > 0 && w_pos < w) {
+        w = w_pos;
+    }
+    if (h_pos > 0 && h_pos < h) {
+        h = h_pos;
+    }
+
+    w = (x1 + w) > src->width ? src->width - x1 : w;
+    h = (y1 + h) > src->height ? src->height - y1 : h;
+
+    x2 = x1 + w;
+    y2 = y1 + h;
+
+    if (x2 > src->width) {
+        x2 = src->width;
+    }
+    if (y2 > src->height) {
+        y2 = src->height;
+    }
+
+    GLuint dest_start_x = x_coord;
+    GLuint dest_start_y = y_coord;
+    GLuint dest_end_x = x_coord + w;
+    GLuint dest_end_y = y_coord + h;
+
+    if (dest_start_x > dst->width) dest_start_x = dst->width;
+    if (dest_start_y > dst->height) dest_start_y = dst->height;
+    if (dest_end_x > dst->width) dest_end_x = dst->width;
+    if (dest_end_y > dst->height) dest_end_y = dst->height;
+
+    if (dest_start_x >= dest_end_x || dest_start_y >= dest_end_y) {
+        fprintf(stderr, "egl_fb_blit_scanout: skip - region outside bounds\n");
+        return;
+    }
+
+    dst_x1 = dest_start_x;
+    dst_x2 = dest_end_x;
+
+    if (flip) {
+        dst_y1 = dst->height - dest_start_y;
+        dst_y2 = dst->height - dest_end_y;
+    } else {
+        dst_y1 = dest_start_y;
+        dst_y2 = dest_end_y;
+    }
+
+    GLenum status_read = glCheckFramebufferStatus(GL_READ_FRAMEBUFFER);
+    GLenum status_draw = glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER);
+    if (status_read == GL_FRAMEBUFFER_COMPLETE && status_draw == GL_FRAMEBUFFER_COMPLETE) {
+        glBlitFramebuffer(x1, y1, x2, y2,
+                          dst_x1, dst_y1, dst_x2, dst_y2,
+                          GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    }
+}
 
 void egl_fb_blit_overlay(egl_fb *dst, egl_fb *src, bool flip, uint32_t x_coord,
                          uint32_t y_coord)
-
 {
-
     if (!dst || !src) {
         return;
     }

@@ -508,6 +508,10 @@ static void sdl2_gl_real_scanout_flush(DisplayChangeListener *dcl)
     struct SDL_WindowEglSurfaceData *data = SDL_GetWindowData(scon->real_window,
                                                               SDL_WINDOWEGLSURFACEDATA);
     int ww, wh;
+    uint32_t x_coord = 0;
+    uint32_t y_coord = 0;
+    uint32_t w_pos = 0;
+    uint32_t h_pos = 0;
 
     assert(scon->opengl);
     if (!scon->scanout_mode) {
@@ -535,7 +539,21 @@ static void sdl2_gl_real_scanout_flush(DisplayChangeListener *dcl)
 
     SDL_GetWindowSize(scon->real_window, &ww, &wh);
     egl_fb_setup_default(&scon->win_fb, ww, wh);
-    egl_fb_blit(&scon->win_fb, &scon->guest_fb, !scon->y0_top);
+
+    if (scon->guest_fb.dmabuf != NULL &&
+        (scon->guest_fb.dmabuf->x_coord != 0 || scon->guest_fb.dmabuf->y_coord != 0 ||
+         scon->guest_fb.dmabuf->w_pos != scon->win_fb.width ||
+         scon->guest_fb.dmabuf->h_pos != scon->win_fb.height)) {
+
+        x_coord = scon->guest_fb.dmabuf->x_coord;
+        y_coord = scon->guest_fb.dmabuf->y_coord;
+        w_pos = scon->guest_fb.dmabuf->w_pos;
+        h_pos = scon->guest_fb.dmabuf->h_pos;
+
+        egl_fb_blit_with_pos(&scon->win_fb, &scon->guest_fb, !scon->y0_top, x_coord, y_coord, w_pos, h_pos);
+    }else{
+        egl_fb_blit(&scon->win_fb, &scon->guest_fb, !scon->y0_top);
+    }
 
     if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_WAYLAND && scon->wayland_console){
         struct wayland_sub_window *sub;

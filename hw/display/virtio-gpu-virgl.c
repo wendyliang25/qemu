@@ -862,6 +862,10 @@ static void virgl_cmd_set_scanout_blob(VirtIOGPU *g,
      */
     vres->type = VIRGL_GPU_RESOURCE_TYPE_SCANOUT;
     vres->scanout_id = ss.scanout_id;
+    vres->res.x_coord = ss.x_coord;
+    vres->res.y_coord = ss.y_coord;
+    vres->res.w_pos = ss.w_pos;
+    vres->res.h_pos = ss.h_pos;
 
     if (virgl_renderer_resource_get_info(ss.resource_id, &info)) {
         qemu_log_mask(LOG_GUEST_ERROR,

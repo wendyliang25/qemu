@@ -32,6 +32,8 @@ void egl_fb_setup_new_tex(egl_fb *fb, int width, int height);
 void egl_fb_blit(egl_fb *dst, egl_fb *src, bool flip);
 void egl_fb_blit_overlay(egl_fb *dst, egl_fb *src, bool flip, uint32_t x_coord,
                          uint32_t y_coord);
+void egl_fb_blit_with_pos(egl_fb *dst, egl_fb *src, bool flip, uint32_t x_coord,
+                         uint32_t y_coord, uint32_t w_pos, uint32_t h_pos);
 void egl_fb_read(DisplaySurface *dst, egl_fb *src);
 
 void egl_texture_blit(QemuGLShader *gls, egl_fb *dst, egl_fb *src, bool flip);

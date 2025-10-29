@@ -205,6 +205,8 @@ static VGPUDMABuf
     dmabuf->buf.stride = fb->stride;
     dmabuf->buf.x = r->x;
     dmabuf->buf.y = r->y;
+    dmabuf->buf.x_coord = res->x_coord;
+    dmabuf->buf.y_coord = res->y_coord;
     dmabuf->buf.scanout_width = r->width;
     dmabuf->buf.scanout_height = r->height;
     dmabuf->buf.fourcc = qemu_pixman_to_drm_format(fb->format);
@@ -220,14 +222,17 @@ static VGPUDMABuf
         dmabuf->buf.offsets[i] = res->offsets[i];
     }
 
+    if(type == VIRGL_GPU_RESOURCE_TYPE_SCANOUT) {
+        dmabuf->buf.w_pos = res->w_pos;
+        dmabuf->buf.h_pos = res->h_pos;
+    }
+
     /* Extra props for overlay buffer */
     if (type == VIRGL_GPU_RESOURCE_TYPE_OVERLAY) {
         dmabuf->overlay_id = overlay_id;
         dmabuf->buf.zpos = res->zpos;
         dmabuf->buf.alpha = res->alpha;
         dmabuf->buf.pixel_blend_mode = res->pixel_blend_mode;
-        dmabuf->buf.x_coord = res->x_coord;
-        dmabuf->buf.y_coord = res->y_coord;
         dmabuf->buf.scale_width = res->scale_width;
         dmabuf->buf.scale_height = res->scale_height;
     }
