@@ -79,6 +79,7 @@ enum virtio_gpu_ctrl_type {
 	VIRTIO_GPU_CMD_RESOURCE_UNREF,
 	VIRTIO_GPU_CMD_SET_SCANOUT,
 	VIRTIO_GPU_CMD_RESOURCE_FLUSH,
+	VIRTIO_GPU_CMD_RESOURCE_FLUSH_BATCH,
 	VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D,
 	VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING,
 	VIRTIO_GPU_CMD_RESOURCE_DETACH_BACKING,
@@ -228,6 +229,14 @@ struct virtio_gpu_resource_flush {
 	struct virtio_gpu_rect r;
 	uint32_t resource_id;
 	uint32_t padding;
+};
+
+/* VIRTIO_GPU_CMD_RESOURCE_FLUSH_BATCH */
+struct virtio_gpu_resource_flush_batch {
+	struct virtio_gpu_ctrl_hdr hdr;
+	struct virtio_gpu_rect rects[9];
+	uint32_t resource_ids[9];
+	uint32_t res_num;
 };
 
 /* VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D: simple transfer to_host */
@@ -406,7 +415,7 @@ enum virtio_gpu_formats {
 	VIRTIO_GPU_FORMAT_B10G10R10X2_UNORM  = 6,
 	VIRTIO_GPU_FORMAT_NV12_UNORM      = 7,
 	VIRTIO_GPU_FORMAT_P010_UNORM      = 8,
-	
+
 	VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM  = 67,
 	VIRTIO_GPU_FORMAT_X8B8G8R8_UNORM  = 68,
 

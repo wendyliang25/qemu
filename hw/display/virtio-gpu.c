@@ -1137,7 +1137,7 @@ void virtio_gpu_process_cmdq(VirtIOGPU *g)
         }
 
         if (!cmd->finished) {
-            if (cmd->cmd_hdr.type == VIRTIO_GPU_CMD_RESOURCE_FLUSH) {
+            if (cmd->cmd_hdr.type == VIRTIO_GPU_CMD_RESOURCE_FLUSH_BATCH) {
                 virtio_gpu_flush_fence_enqueue(g, cmd);
             } else {
                 QTAILQ_INSERT_TAIL(&g->fenceq, cmd, next);

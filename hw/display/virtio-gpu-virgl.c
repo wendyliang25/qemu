@@ -241,27 +241,153 @@ static void virgl_cmd_context_destroy(VirtIOGPU *g,
     virgl_renderer_context_destroy(cd.hdr.ctx_id);
 }
 
-static void virtio_gpu_rect_update(VirtIOGPU *g, int idx, int x, int y,
+static int virtio_gpu_rect_update(VirtIOGPU *g, int idx, int x, int y,
                                    int width, int height, uint64_t fence_id)
 {
     if (!g->parent_obj.scanout[idx].con) {
-        return;
+        return -ENODEV;
     }
 
     return dpy_gl_update_fenced(g->parent_obj.scanout[idx].con, x, y, width, height, fence_id);
 }
 
-static void
+static enum virtio_gpu_ctrl_type virgl_flush_errno_to_resp(int err)
+{
+    switch (-err) {
+    case ENODEV:
+        return VIRTIO_GPU_RESP_ERR_INVALID_SCANOUT_ID;
+    case ENOENT:
+        return VIRTIO_GPU_RESP_ERR_INVALID_OVERLAY_ID;
+    case EINVAL:
+    case EACCES:
+        return VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER;
+    case ENOMEM:
+        return VIRTIO_GPU_RESP_ERR_OUT_OF_MEMORY;
+    default:
+        return VIRTIO_GPU_RESP_ERR_UNSPEC;
+    }
+}
+
+static int
 virgl_cmd_resource_flush_overlay(VirtIOGPU *g, struct virgl_gpu_resource *vres,
                                  struct virtio_gpu_resource_flush *rf, uint64_t fence_id)
 {
     QemuConsole *con = g->parent_obj.scanout[vres->scanout_id].con;
+    int ret;
 
-    if (!con)
+    if (!con) {
+        return -ENODEV;
+    }
+
+    ret = dpy_gl_update_overlay(con, vres->overlay_id, rf->r.x, rf->r.y,
+                                rf->r.width, rf->r.height, fence_id);
+    if (ret < 0) {
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: overlay flush failed id=%u scanout=%u err=%d\n",
+                      __func__, vres->overlay_id, vres->scanout_id, ret);
+    }
+
+    return ret;
+}
+
+static void virgl_cmd_resource_flush_batch(VirtIOGPU *g,
+                                           struct virtio_gpu_ctrl_command *cmd)
+{
+    struct virgl_gpu_resource *vres;
+    struct virtio_gpu_resource_flush_batch rf;
+
+    VIRTIO_GPU_FILL_CMD(rf);
+
+    QemuConsole *con = NULL;
+    QemuPlaneFlushInfo planes[9];
+    uint32_t plane_count = 0;
+    uint32_t scanout_id = 0;
+    int i, j;
+    int ret;
+
+    trace_virtio_gpu_cmd_res_flush_batch(rf.res_num);
+
+    /* Collect all planes (primary + overlays) with their individual rects */
+    for (i = 0; i < rf.res_num && i < 9; i++) {
+        uint32_t res_id = rf.resource_ids[i];
+
+        vres = virgl_gpu_find_resource(g, res_id);
+        if (!vres) {
+            qemu_log_mask(LOG_GUEST_ERROR,
+                          "%s: illegal resource specified %d in batch\n",
+                          __func__, res_id);
+            continue;
+        }
+
+        /* Determine console - all planes should belong to the same scanout */
+        if (vres->type == VIRGL_GPU_RESOURCE_TYPE_OVERLAY) {
+            if (plane_count == 0) {
+                scanout_id = vres->scanout_id;
+                con = g->parent_obj.scanout[scanout_id].con;
+            } else if (scanout_id != vres->scanout_id) {
+                qemu_log_mask(LOG_GUEST_ERROR,
+                              "%s: resources belong to different scanouts\n",
+                              __func__);
+                continue;
+            }
+
+            planes[plane_count].type = QEMU_PLANE_TYPE_OVERLAY;
+            planes[plane_count].scanout_id = vres->scanout_id;
+            planes[plane_count].overlay_id = vres->overlay_id;
+            planes[plane_count].resource_id = res_id;
+            planes[plane_count].x = rf.rects[i].x;
+            planes[plane_count].y = rf.rects[i].y;
+            planes[plane_count].width = rf.rects[i].width;
+            planes[plane_count].height = rf.rects[i].height;
+            plane_count++;
+
+        } else if (vres->type == VIRGL_GPU_RESOURCE_TYPE_SCANOUT) {
+            /* This is a primary plane (scanout) */
+            /* Find which scanout this resource belongs to */
+            for (j = 0; j < g->parent_obj.conf.max_outputs; j++) {
+                if (g->parent_obj.scanout[j].resource_id == res_id) {
+                    if (plane_count == 0) {
+                        scanout_id = j;
+                        con = g->parent_obj.scanout[scanout_id].con;
+                    } else if (scanout_id != j) {
+                        qemu_log_mask(LOG_GUEST_ERROR,
+                                      "%s: resources belong to different scanouts\n",
+                                      __func__);
+                        continue;
+                    }
+
+                    planes[plane_count].type = QEMU_PLANE_TYPE_PRIMARY;
+                    planes[plane_count].scanout_id = j;
+                    planes[plane_count].overlay_id = 0;  /* Not applicable for primary */
+                    planes[plane_count].resource_id = res_id;
+                    planes[plane_count].x = rf.rects[i].x;
+                    planes[plane_count].y = rf.rects[i].y;
+                    planes[plane_count].width = rf.rects[i].width;
+                    planes[plane_count].height = rf.rects[i].height;
+                    plane_count++;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (plane_count == 0) {
         return;
+    }
 
-    dpy_gl_update_overlay(con, vres->overlay_id, rf->r.x, rf->r.y, rf->r.width,
-                          rf->r.height, fence_id);
+    if (!con) {
+        cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_SCANOUT_ID;
+        return;
+    }
+
+    trace_virtio_gpu_cmd_res_flush_batch_planes(plane_count, scanout_id);
+
+    /* Call unified batch flush interface for all planes */
+    ret = dpy_gl_flush_planes_batch(con, planes, plane_count,
+                                    cmd->cmd_hdr.fence_id);
+    if (ret < 0) {
+        cmd->error = virgl_flush_errno_to_resp(ret);
+    }
 }
 
 static void virgl_cmd_resource_flush(VirtIOGPU *g,
@@ -284,16 +410,25 @@ static void virgl_cmd_resource_flush(VirtIOGPU *g,
         return;
     }
 
-    if (vres->type == VIRGL_GPU_RESOURCE_TYPE_OVERLAY){
-        return virgl_cmd_resource_flush_overlay(g, vres, &rf, cmd->cmd_hdr.fence_id);
+    if (vres->type == VIRGL_GPU_RESOURCE_TYPE_OVERLAY) {
+        int ret = virgl_cmd_resource_flush_overlay(g, vres, &rf,
+                                                   cmd->cmd_hdr.fence_id);
+        if (ret < 0) {
+            cmd->error = virgl_flush_errno_to_resp(ret);
+        }
+        return;
     }
 
     for (i = 0; i < g->parent_obj.conf.max_outputs; i++) {
         if (g->parent_obj.scanout[i].resource_id != rf.resource_id) {
             continue;
         }
-        virtio_gpu_rect_update(g, i, rf.r.x, rf.r.y, rf.r.width, rf.r.height,
-                               cmd->cmd_hdr.fence_id);
+        int ret = virtio_gpu_rect_update(g, i, rf.r.x, rf.r.y, rf.r.width, rf.r.height,
+                                         cmd->cmd_hdr.fence_id);
+        if (ret < 0) {
+            cmd->error = virgl_flush_errno_to_resp(ret);
+        }
+        return;
     }
 }
 
@@ -1112,6 +1247,9 @@ void virtio_gpu_virgl_process_cmd(VirtIOGPU *g,
         break;
     case VIRTIO_GPU_CMD_RESOURCE_FLUSH:
         virgl_cmd_resource_flush(g, cmd);
+        break;
+    case VIRTIO_GPU_CMD_RESOURCE_FLUSH_BATCH:
+        virgl_cmd_resource_flush_batch(g, cmd);
         break;
     case VIRTIO_GPU_CMD_RESOURCE_UNREF:
         virgl_cmd_resource_unref(g, cmd);

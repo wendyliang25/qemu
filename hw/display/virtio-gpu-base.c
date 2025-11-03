@@ -336,6 +336,8 @@ QEMU_BUILD_BUG_ON(sizeof(struct virtio_gpu_resource_unref)          != 32);
 QEMU_BUILD_BUG_ON(sizeof(struct virtio_gpu_resource_create_2d)      != 40);
 QEMU_BUILD_BUG_ON(sizeof(struct virtio_gpu_set_scanout)             != 48);
 QEMU_BUILD_BUG_ON(sizeof(struct virtio_gpu_resource_flush)          != 48);
+/* Updated size after extending virtio_gpu_resource_flush to batch (rects + ids). */
+QEMU_BUILD_BUG_ON(sizeof(struct virtio_gpu_resource_flush_batch)    != 208);
 QEMU_BUILD_BUG_ON(sizeof(struct virtio_gpu_transfer_to_host_2d)     != 56);
 QEMU_BUILD_BUG_ON(sizeof(struct virtio_gpu_mem_entry)               != 16);
 QEMU_BUILD_BUG_ON(sizeof(struct virtio_gpu_resource_attach_backing) != 32);
