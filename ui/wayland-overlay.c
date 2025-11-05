@@ -660,7 +660,7 @@ void wayland_update_sub_window(struct wayland_console *parent,
     sub->valid = true;
     sub->flush_count = 0;
 
-    if (sub->viewport && (width != scale_width || height != scale_height))
+    if (sub->viewport)
         wp_viewport_set_destination(sub->viewport, scale_width, scale_height);
 
     if (sub->subsurface) {
@@ -709,7 +709,7 @@ static bool wayland_create_sub_window_resources(struct wayland_console *parent,
 
     if (parent->viewporter)
         sub->viewport = wp_viewporter_get_viewport(parent->viewporter, sub->surface);
-    if (sub->viewport)
+    if (!sub->viewport)
         fprintf(stderr, "Warning: Overlay scaling is not supported!\n");
     if (parent->abc_manager)
 		sub->abc = zwp_alpha_blend_control_manager_v1_get_alpha_blend_control(parent->abc_manager, sub->surface);
