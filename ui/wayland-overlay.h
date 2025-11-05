@@ -97,7 +97,7 @@ struct wayland_console {
     int32_t pointer_last_y;
 
     struct wp_viewporter *viewporter;
-    struct wp_alpha_modifier_v1 *abc_manager;
+    struct zwp_alpha_blend_control_manager_v1 *abc_manager;
 };
 
 /* API function declarations */
