@@ -787,6 +787,72 @@ int wayland_flush_sub_window(struct wayland_sub_window *sub,
     return 0;
 }
 
+/*
+ * Reorder all subsurfaces according to their zpos values
+ * Lower zpos values should be placed above higher zpos values (closer to viewer)
+ */
+static void wayland_reorder_subsurfaces_by_zpos(struct wayland_console *console)
+{
+    struct wayland_sub_window *sub, *prev_sub;
+    struct wayland_sub_window **sorted_array;
+    int i, j, count;
+
+    if (!console || !console->num_sub_windows) {
+        return;
+    }
+
+    /* Allocate temporary array to hold all subsurface pointers */
+    sorted_array = g_new0(struct wayland_sub_window *, console->num_sub_windows);
+    if (!sorted_array) {
+        fprintf(stderr, "Failed to allocate memory for sorting subsurfaces\n");
+        return;
+    }
+
+    /* Collect all subsurfaces into the array */
+    count = 0;
+    QLIST_FOREACH(sub, &console->sub_windows, next) {
+        if (count < console->num_sub_windows) {
+            sorted_array[count++] = sub;
+        }
+    }
+
+    /* Simple insertion sort by zpos (lower zpos = higher in z-order, closer to viewer) */
+    for (i = 1; i < count; i++) {
+        struct wayland_sub_window *key = sorted_array[i];
+        j = i - 1;
+        while (j >= 0 && sorted_array[j]->zpos > key->zpos) {
+            sorted_array[j + 1] = sorted_array[j];
+            j--;
+        }
+        sorted_array[j + 1] = key;
+    }
+
+    /* Apply the z-order using wl_subsurface_place_above
+     * Start from the bottom (highest zpos) and place each one above the previous
+     * The first one (lowest zpos) will be on top */
+    for (i = 0; i < count; i++) {
+        sub = sorted_array[i];
+        if (i == 0) {
+            /* First subsurface (lowest zpos) - place it above main surface
+             * so it's at the bottom of all subsurfaces */
+            if (sub->subsurface_proxy) {
+                wl_subsurface_place_above(sub->subsurface_proxy, console->main_surface);
+            }
+        } else {
+            /* Place this subsurface above the previous one (lower zpos) */
+            prev_sub = sorted_array[i - 1];
+            if (sub->subsurface_proxy && prev_sub->surface_proxy) {
+                wl_subsurface_place_above(sub->subsurface_proxy, prev_sub->surface_proxy);
+            }
+        }
+    }
+
+    g_free(sorted_array);
+
+    /* Commit the main surface to apply the z-order changes */
+    wl_surface_commit(console->main_surface);
+}
+
 void wayland_update_sub_window(struct wayland_console *parent,
                                uint32_t plane_id,
                                uint32_t x, uint32_t y,
@@ -797,6 +863,7 @@ void wayland_update_sub_window(struct wayland_console *parent,
                                uint32_t scale_width, uint32_t scale_height)
 {
     struct wayland_sub_window *sub = wayland_find_sub_window(parent, plane_id);
+    bool is_new_window = false;
 
     if (!parent || !parent->main_surface) {
         return;
@@ -808,12 +875,15 @@ void wayland_update_sub_window(struct wayland_console *parent,
             fprintf(stderr, "Failed to create sub window for plane %u\n", plane_id);
             return;
         }
+        is_new_window = true;
     }
 
     if (x == 0) sub->x = -src_x;
     else sub->x = x;
     if (y == 0) sub->y = -src_y;
     else sub->y = y;
+
+    bool zpos_changed = (sub->zpos != zpos);
 
     sub->width = width;
     sub->height = height;
@@ -835,10 +905,18 @@ void wayland_update_sub_window(struct wayland_console *parent,
     if (sub->subsurface) {
         wl_subsurface_set_position(sub->subsurface, x, y);
     }
+
     if (sub->abc) {
         zwp_alpha_blend_control_v1_set_alpha(
             sub->abc, wl_fixed_from_double(alpha / ALPHA_MAX_UINT16_D));
         zwp_alpha_blend_control_v1_set_blend_mode(sub->abc, pixel_blend_mode);
+    }
+    
+    /* Reorder subsurfaces if zpos changed or it's a new window
+     * Note: new windows are already reordered in wayland_create_sub_window,
+     * but we need to reorder again here with the correct zpos value */
+    if (zpos_changed || is_new_window) {
+        wayland_reorder_subsurfaces_by_zpos(parent);
     }
 }
 
@@ -972,6 +1050,9 @@ struct wayland_sub_window *wayland_create_sub_window(struct wayland_console *par
 
     QLIST_INSERT_HEAD(&parent->sub_windows, sub, next);
     parent->num_sub_windows++;
+
+    /* Set initial z-order for the new subsurface */
+    wayland_reorder_subsurfaces_by_zpos(parent);
 
     wl_surface_commit(sub->surface_proxy);
 
