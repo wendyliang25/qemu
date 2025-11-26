@@ -6,6 +6,7 @@
 #include "ui/linux-dmabuf-v1-client.h"
 #include "ui/viewporter-client.h"
 #include "ui/zwp_alpha_blend_control_manager_v1-client.h"
+#include "ui/presentation-time-client.h"
 
 #include "ui/console.h"
 #include "qemu/queue.h"
@@ -68,6 +69,10 @@ struct wayland_sub_window {
     /* Batch flush tracking - marks if this plane is part of a batch operation */
     bool in_batch;
 
+    /* Virgl resource tracking for wait_for_idle */
+    uint32_t ctx_id;
+    uint32_t resource_id;
+
     QLIST_ENTRY(wayland_sub_window) next;
 
     struct wayland_console *wl_console;
@@ -106,16 +111,36 @@ struct wayland_console {
     int wl_fd;                          /* Wayland display file descriptor */
     bool wl_fd_registered;              /* Whether fd handler is registered */
 
-    /* Main surface frame callback for scanout fence tracking */
-    struct wl_callback *main_frame_callback;
-    uint64_t main_fence_id;
-    bool main_framing;
+    /*
+     * Fence synchronization via frame callback + presentation-based vblank calibration.
+     *
+     * Logic:
+     * 1. Presentation feedback continuously calibrates vblank timing (runs independently)
+     * 2. Frame callback triggers fence signal at (next_vblank - FENCE_SIGNAL_BEFORE_VBLANK_US)
+     *
+     * Timeline:
+     *   |<-------- refresh period -------->|
+     *   vblank_n                           vblank_n+1
+     *   |        frame_cb |<--delay-->| fence
+     *                                 ^
+     *                                 next_vblank - before_vblank_us
+     */
 
-    /* Batch flush tracking for synchronized fence signaling */
-    uint64_t batch_fence_id;          /* Fence ID for current batch flush */
-    uint32_t batch_total_planes;      /* Total planes in current batch */
-    uint32_t batch_completed_planes;  /* Completed planes (frame callbacks received) */
-    bool batch_in_progress;           /* Whether a batch flush is in progress */
+    /* Main surface frame callback for fence triggering */
+    struct wl_callback *main_frame_callback;
+    uint64_t pending_fence_id;          /* Fence ID waiting for signal */
+
+    /* Presentation protocol for vblank calibration (independent from fence) */
+    struct wp_presentation *presentation;
+    struct wp_presentation_feedback *calibration_feedback;
+
+    /* Calibrated vblank timing */
+    uint64_t vblank_period_ns;          /* Refresh period in nanoseconds */
+    uint64_t last_vblank_ns;            /* Last known vblank timestamp */
+    bool vblank_calibrated;             /* Whether vblank timing is valid */
+
+    /* Timer for delayed fence signal */
+    QEMUTimer *fence_timer;
 };
 
 /* API function declarations */
@@ -146,10 +171,10 @@ void wayland_clean_invalid_sub_windows(struct wayland_console *parent);
 /* Used by sdl2_gl_overlay_dmabuf */
 void wayland_update_dmabuf(struct wayland_sub_window *sub,
                            QemuDmaBuf *dmabuf);
-/* Used by sdl2_gl_overlay_flush */
+
+/* Used by sdl2_gl_overlay_flush - commits buffer to subsurface */
 int wayland_flush_sub_window(struct wayland_sub_window *sub,
-                             uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                             uint64_t fence_id);
+                             uint32_t x, uint32_t y, uint32_t w, uint32_t h);
 
 void wayland_release_buffer(struct wayland_sub_window *sub,
                             struct wayland_buffer *buffer);
@@ -169,7 +194,13 @@ bool wayland_is_alive(struct wayland_console *console);
 /* Flush Wayland display requests to compositor */
 void wayland_display_flush(struct wayland_console *console);
 
-/* Frame callback listener for main surface fence tracking */
+/*
+ * Register fence for delayed signaling via frame callback.
+ * Fence will be signaled at (next_vblank - FENCE_SIGNAL_BEFORE_VBLANK_US).
+ */
+void wayland_register_fence(struct wayland_console *console, uint64_t fence_id);
+
+/* Frame callback listener for main surface */
 extern const struct wl_callback_listener main_frame_listener;
 
 #endif /* WAYLAND_OVERLAY_H */

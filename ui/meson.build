@@ -145,6 +145,7 @@ if sdl.found()
       'linux-dmabuf-v1': 'stable/linux-dmabuf/linux-dmabuf-v1.xml',
       'viewporter': 'stable/viewporter/viewporter.xml',
       'zwp_alpha_blend_control_manager_v1': 'unstable/alpha-blend-control/alpha-blend-control-unstable-v1.xml',
+      'presentation-time': 'stable/presentation-time/presentation-time.xml',
     }
 
     foreach name, path : protocols

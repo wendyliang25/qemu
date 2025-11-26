@@ -41,6 +41,163 @@
 
 #define ALPHA_MAX_UINT16_D 65535.0
 
+/*
+ * Fence signal timing configuration.
+ *
+ * FENCE_SIGNAL_BEFORE_VBLANK_US: How many microseconds before vblank to signal fence.
+ *   - Lower value = lower latency but risk missing vblank
+ *   - Higher value = safer but higher latency
+ *   - Recommended: 500-2000 us (0.5-2 ms)
+ */
+#define FENCE_SIGNAL_BEFORE_VBLANK_US  500
+
+/* Default vblank period if not yet calibrated (60Hz) */
+#define DEFAULT_VBLANK_PERIOD_NS  16666666
+
+static inline uint64_t get_time_ns(void) {
+  return qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+}
+
+/**
+ * Calculate next vblank time based on calibrated timing.
+ * Returns 0 if not calibrated.
+ */
+static uint64_t predict_next_vblank(struct wayland_console *console, uint64_t now_ns)
+{
+    if (!console->vblank_calibrated || console->vblank_period_ns == 0) {
+        return 0;
+    }
+
+    uint64_t elapsed = now_ns - console->last_vblank_ns;
+    uint64_t periods = elapsed / console->vblank_period_ns;
+
+    return console->last_vblank_ns + (periods + 1) * console->vblank_period_ns;
+}
+
+static void signal_fence(struct wayland_console *console)
+{
+    if (!console || console->pending_fence_id == 0) {
+        return;
+    }
+
+    struct sdl2_console *sdlc = console->parent_console;
+    uint64_t fence_id = console->pending_fence_id;
+    console->pending_fence_id = 0;
+
+    if (sdlc && sdlc->dcl.con) {
+        graphic_hw_gl_flush_done(sdlc->dcl.con, fence_id);
+    }
+}
+
+static void fence_timer_callback(void *opaque)
+{
+    struct wayland_console *console = opaque;
+    signal_fence(console);
+}
+
+/**
+ * Schedule fence signal at vblank - FENCE_SIGNAL_BEFORE_VBLANK_US.
+ * Called when frame callback fires.
+ */
+static void schedule_fence_for_vblank(struct wayland_console *console)
+{
+    uint64_t now_ns = get_time_ns();
+    uint64_t next_vblank = predict_next_vblank(console, now_ns);
+
+    if (next_vblank == 0) {
+        signal_fence(console);
+        return;
+    }
+
+    uint64_t before_vblank_ns = FENCE_SIGNAL_BEFORE_VBLANK_US * 1000ULL;
+    uint64_t signal_time_ns = next_vblank - before_vblank_ns;
+
+    if (signal_time_ns <= now_ns) {
+        signal_fence(console);
+        return;
+    }
+
+    int64_t delay_ns = signal_time_ns - now_ns;
+    int64_t delay_ms = delay_ns / 1000000;
+    if (delay_ms < 1) delay_ms = 1;  /* Minimum 1ms */
+
+    timer_mod(console->fence_timer,
+              qemu_clock_get_ms(QEMU_CLOCK_REALTIME) + delay_ms);
+
+}
+
+static void calibration_feedback_sync_output(void *data,
+                                             struct wp_presentation_feedback *feedback,
+                                             struct wl_output *output)
+{
+    /* No action needed for sync_output in this implementation */
+}
+
+static void calibration_feedback_discarded(void *data,
+                                           struct wp_presentation_feedback *feedback)
+{
+    struct wayland_console *console = data;
+
+    if (console->calibration_feedback == feedback) {
+        wp_presentation_feedback_destroy(feedback);
+        console->calibration_feedback = NULL;
+    }
+}
+
+/**
+ * Presentation feedback: presented event
+ * Used only for vblank calibration - does NOT trigger fence directly.
+ */
+static void calibration_feedback_presented(void *data,
+                                           struct wp_presentation_feedback *feedback,
+                                           uint32_t tv_sec_hi,
+                                           uint32_t tv_sec_lo,
+                                           uint32_t tv_nsec,
+                                           uint32_t refresh,
+                                           uint32_t seq_hi,
+                                           uint32_t seq_lo,
+                                           uint32_t flags)
+{
+    struct wayland_console *console = data;
+    uint64_t now_ns = get_time_ns();
+
+    if (refresh > 0) {
+        console->vblank_period_ns = refresh;
+        console->last_vblank_ns = now_ns;
+        console->vblank_calibrated = true;
+    }
+
+    if (console->calibration_feedback == feedback) {
+        wp_presentation_feedback_destroy(feedback);
+        console->calibration_feedback = NULL;
+    }
+}
+
+static const struct wp_presentation_feedback_listener calibration_feedback_listener = {
+    .sync_output = calibration_feedback_sync_output,
+    .presented = calibration_feedback_presented,
+    .discarded = calibration_feedback_discarded,
+};
+
+static void register_calibration_feedback(struct wayland_console *console)
+{
+    if (!console->presentation || !console->main_surface) {
+        return;
+    }
+
+    if (console->calibration_feedback) {
+        wp_presentation_feedback_destroy(console->calibration_feedback);
+    }
+
+    console->calibration_feedback = wp_presentation_feedback(console->presentation,
+                                                             console->main_surface);
+    if (console->calibration_feedback) {
+        wp_presentation_feedback_add_listener(console->calibration_feedback,
+                                              &calibration_feedback_listener,
+                                              console);
+    }
+}
+
 static void registry_global(void *data, struct wl_registry *registry,
                             uint32_t id, const char *interface,
                             uint32_t version)
@@ -59,6 +216,8 @@ static void registry_global(void *data, struct wl_registry *registry,
          out->viewporter = wl_registry_bind(registry, id, &wp_viewporter_interface, 1);
     } else if (strcmp(interface, "zwp_alpha_blend_control_manager_v1") == 0) {
          out->abc_manager = wl_registry_bind(registry, id, &zwp_alpha_blend_control_manager_v1_interface, 1);
+    } else if (strcmp(interface, wp_presentation_interface.name) == 0) {
+         out->presentation = wl_registry_bind(registry, id, &wp_presentation_interface, 1);
     }
 }
 
@@ -350,90 +509,27 @@ static const struct wl_seat_listener seat_listener = {
     .name = seat_handle_name,
 };
 
-/* Check if all planes in the current batch have completed and signal fence if so */
-static void check_and_signal_batch_fence(struct wayland_console *console)
-{
-    if (!console || !console->batch_in_progress) {
-        return;
-    }
+static int commit_buffer(struct wayland_sub_window *sub);
 
-    console->batch_completed_planes++;
-
-    if (console->batch_completed_planes >= console->batch_total_planes) {
-        if (console->batch_fence_id != 0) {
-            struct sdl2_console *sdlc = console->parent_console;
-            graphic_hw_gl_flush_done(sdlc->dcl.con, console->batch_fence_id);
-        }
-
-        console->batch_fence_id = 0;
-        console->batch_total_planes = 0;
-        console->batch_completed_planes = 0;
-        console->batch_in_progress = false;
-    }
-}
-
-static void sub_window_flush_done(struct wayland_sub_window *sub)
-{
-    if (sub->valid) {
-        struct sdl2_console *sdlc = sub->wl_console->parent_console;
-        
-        /* Check if this sub-window is part of a batch operation */
-        if (sub->in_batch) {
-            check_and_signal_batch_fence(sub->wl_console);
-            sub->in_batch = false;
-        } else {
-            graphic_hw_gl_flush_done(sdlc->dcl.con, sub->fence);
-        }
-        
-        sub->fence = 0;
-    }
-}
-
-static void main_surface_flush_done(struct wayland_console *console)
-{
-    if (console->main_fence_id != 0) {
-        struct sdl2_console *sdlc = console->parent_console;
-        
-        /* Check if main surface is part of a batch operation */
-        if (console->batch_in_progress) {
-            check_and_signal_batch_fence(console);
-        } else {
-            graphic_hw_gl_flush_done(sdlc->dcl.con, console->main_fence_id);
-        }
-        
-        console->main_fence_id = 0;
-    }
-}
-
-static int commit_buffer(struct wayland_sub_window *sub, uint64_t fence_id);
-
-static void frame_handle_done(void *data, struct wl_callback *cb, uint32_t time)
-{
-    struct wayland_sub_window *sub = data;
-
-    if (sub && sub->valid) {
-        wl_callback_destroy(sub->frame_callback);
-        sub->frame_callback = NULL;
-        sub->framing = false;
-
-        sub_window_flush_done(sub);
-    }
-}
-
-static const struct wl_callback_listener frame_listener = {
-    .done = frame_handle_done,
-};
-
+/**
+ * Main surface frame callback handler.
+ * Triggers delayed fence signal based on calibrated vblank timing.
+ */
 static void main_frame_handle_done(void *data, struct wl_callback *cb, uint32_t time)
 {
     struct wayland_console *console = data;
 
-    if (console) {
+    if (!console) {
+        return;
+    }
+
+    if (console->main_frame_callback) {
         wl_callback_destroy(console->main_frame_callback);
         console->main_frame_callback = NULL;
-        console->main_framing = false;
+    }
 
-        main_surface_flush_done(console);
+    if (console->pending_fence_id != 0) {
+        schedule_fence_for_vblank(console);
     }
 }
 
@@ -526,6 +622,31 @@ static void wayland_fd_write_handler(void *opaque)
     }
 }
 
+/**
+ * Register fence for delayed signaling.
+ * Sets up frame callback and presentation feedback for vblank-aligned fence.
+ */
+void wayland_register_fence(struct wayland_console *console, uint64_t fence_id)
+{
+    if (!console || !console->main_surface) {
+        return;
+    }
+
+    console->pending_fence_id = fence_id;
+
+    if (console->main_frame_callback) {
+        wl_callback_destroy(console->main_frame_callback);
+    }
+
+    console->main_frame_callback = wl_surface_frame(console->main_surface);
+    if (console->main_frame_callback) {
+        wl_callback_add_listener(console->main_frame_callback,
+                                 &main_frame_listener, console);
+    }
+
+    register_calibration_feedback(console);
+}
+
 /*
  * Public helper to flush Wayland requests from any context
  * This ensures requests are sent to the compositor.
@@ -573,16 +694,20 @@ struct wayland_console *wayland_console_init(void *parent_console,
     console->pointer_last_x = 0;
     console->pointer_last_y = 0;
 
-    /* Initialize main surface frame callback fields */
+    /* Initialize fence synchronization */
     console->main_frame_callback = NULL;
-    console->main_fence_id = 0;
-    console->main_framing = false;
+    console->pending_fence_id = 0;
+    console->presentation = NULL;
+    console->calibration_feedback = NULL;
 
-    /* Initialize batch flush tracking fields */
-    console->batch_fence_id = 0;
-    console->batch_total_planes = 0;
-    console->batch_completed_planes = 0;
-    console->batch_in_progress = false;
+    /* Initialize vblank calibration */
+    console->vblank_period_ns = DEFAULT_VBLANK_PERIOD_NS;
+    console->last_vblank_ns = 0;
+    console->vblank_calibrated = false;
+
+    /* Initialize fence timer */
+    console->fence_timer = timer_new_ms(QEMU_CLOCK_REALTIME,
+                                        fence_timer_callback, console);
 
     /* Initialize Wayland event handling via QEMU main loop fd handler */
     console->wl_fd = wl_display_get_fd(display);
@@ -652,10 +777,28 @@ void wayland_console_destroy(struct wayland_console *console)
         console->wl_fd_registered = false;
     }
 
-    /* Clean up main surface frame callback */
+    /* Clean up frame callback */
     if (console->main_frame_callback) {
         wl_callback_destroy(console->main_frame_callback);
         console->main_frame_callback = NULL;
+    }
+
+    /* Clean up calibration feedback */
+    if (console->calibration_feedback) {
+        wp_presentation_feedback_destroy(console->calibration_feedback);
+        console->calibration_feedback = NULL;
+    }
+
+    /* Clean up presentation protocol */
+    if (console->presentation) {
+        wp_presentation_destroy(console->presentation);
+        console->presentation = NULL;
+    }
+
+    /* Clean up fence timer */
+    if (console->fence_timer) {
+        timer_free(console->fence_timer);
+        console->fence_timer = NULL;
     }
 
     if (console->pointer) {
@@ -768,7 +911,7 @@ void wayland_update_dmabuf(struct wayland_sub_window *sub,
     sub->buffer_queued = true;
 }
 
-static int commit_buffer(struct wayland_sub_window *sub, uint64_t fence_id)
+static int commit_buffer(struct wayland_sub_window *sub)
 {
     if (!sub->buffer_queued) {
         fprintf(stderr, "[wayland] commit_buffer: buffer not queued for plane %u\n", sub->id);
@@ -791,12 +934,6 @@ static int commit_buffer(struct wayland_sub_window *sub, uint64_t fence_id)
     wl_surface_attach(sub->surface, buf->wl_buffer, 0, 0);
     wl_surface_damage_buffer(sub->surface, 0, 0, buf->width, buf->height);
 
-    sub->fence = fence_id;
-    sub->frame_callback = wl_surface_frame(sub->surface);
-    wl_callback_add_listener(sub->frame_callback, &frame_listener, sub);
-
-    sub->framing = true;
-
     wl_surface_commit(sub->surface_proxy);
     sub->buffer_queued = false;
 
@@ -805,8 +942,7 @@ static int commit_buffer(struct wayland_sub_window *sub, uint64_t fence_id)
 
 
 int wayland_flush_sub_window(struct wayland_sub_window *sub,
-                             uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                             uint64_t fence_id)
+                             uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 {
     int ret;
 
@@ -819,27 +955,11 @@ int wayland_flush_sub_window(struct wayland_sub_window *sub,
     }
 
     sub->flush_count = 0;
-
     wl_subsurface_set_position(sub->subsurface_proxy, sub->x, sub->y);
 
-    if (sub->framing) {
-        if (wl_display_dispatch_queue_pending(sub->wl_console->display,
-                                      sub->event_queue) < 0) {
-            fprintf(stderr, "Failed to dispatch Wayland display queue\n");
-            return -EIO;
-        }
-    }
-
-    if (!sub->framing) {
-        ret = commit_buffer(sub, fence_id);
-        if (ret < 0) {
-            fprintf(stderr, "[wayland] flush_sub_window: commit_buffer failed for plane %u: %d\n",
-                    sub->id, ret);
-            return ret;
-        }
-    } else {
-        fprintf(stderr, "[wayland] flush_sub_window plane %u already framing\n", sub->id);
-        return -EAGAIN;
+    ret = commit_buffer(sub);
+    if (ret < 0) {
+        return ret;
     }
     // wl_display_flush(sub->wl_console->display);
     return 0;
@@ -1032,14 +1152,6 @@ static void wayland_release_sub_window_resources(struct wayland_sub_window *sub)
         return;
     }
 
-    if (sub->frame_callback) {
-        if (sub->fence) {
-            sub_window_flush_done(sub);
-        }
-        wl_callback_destroy(sub->frame_callback);
-        sub->frame_callback = NULL;
-    }
-
     if (sub->viewport)
         wp_viewport_destroy(sub->viewport);
 
@@ -1215,16 +1327,7 @@ void wayland_suspend_sub_windows(struct wayland_console *console)
                sub->surface ? "present" : "none");
 
         if (sub->valid && sub->surface) {
-
-            if (sub->frame_callback) {
-                wl_callback_destroy(sub->frame_callback);
-                sub->frame_callback = NULL;
-                sub->framing = false;
-            }
-
-            if (sub->buffer_queued) {
-                sub->buffer_queued = false;
-            }
+            sub->buffer_queued = false;
             wayland_destroy_sub_window(console, sub->id);
         }
     }

@@ -558,17 +558,19 @@ static void sdl2_gl_real_scanout_flush(DisplayChangeListener *dcl)
 
     if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_WAYLAND && scon->wayland_console){
         struct wayland_sub_window *sub;
+        int sub_count = 0;
         QLIST_FOREACH(sub, &scon->wayland_console->sub_windows, next) {
             wl_surface_commit(sub->surface_proxy);
+            sub_count++;
         }
-
-        wl_surface_commit(scon->wayland_console->main_surface);
-        wayland_display_flush(scon->wayland_console);
     }
 
     SDL_GL_SwapWindow(scon->real_window);
 
-    // sdl2_gl_subwin_flush_sync(scon);
+    if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_WAYLAND &&
+        scon->wayland_console) {
+        wayland_display_flush(scon->wayland_console);
+    }
 }
 
 void sdl2_gl_scanout_flush(DisplayChangeListener *dcl,
@@ -588,7 +590,7 @@ int sdl2_gl_scanout_flush_fenced(DisplayChangeListener *dcl,
     scon->w = w;
     scon->h = h;
 
-    /* Register main surface frame callback for fence tracking */
+    /* Register fence for vblank-aligned signaling */
     if (scon->present_type == SDL2_OVERLAY_PRESENT_TYPE_WAYLAND && fence_id != 0) {
 
         if (!scon->wayland_console) {
@@ -598,19 +600,8 @@ int sdl2_gl_scanout_flush_fenced(DisplayChangeListener *dcl,
                 return -ENODEV;
             }
         }
-        struct wayland_console *wlc = scon->wayland_console;
-
-        /* Clean up previous callback if exists */
-        if (wlc->main_frame_callback) {
-            wl_callback_destroy(wlc->main_frame_callback);
-        }
-
-        wlc->main_fence_id = fence_id;
-        wlc->main_framing = true;
-
-        wlc->main_frame_callback = wl_surface_frame(wlc->main_surface);
-        wl_callback_add_listener(wlc->main_frame_callback, &main_frame_listener, wlc);
-
+        /* Register fence - frame callback + presentation calibration */
+        wayland_register_fence(scon->wayland_console, fence_id);
     }
 
     sdl2_gl_real_scanout_flush(dcl);
@@ -694,7 +685,7 @@ int sdl2_gl_overlay_flush(DisplayChangeListener *dcl, uint32_t id,
         }
 
         sub->flush_count = 0;
-        ret = wayland_flush_sub_window(sub, x, y, w, h, fence_id);
+        ret = wayland_flush_sub_window(sub, x, y, w, h);
         if (ret < 0) {
             return ret;
         }
@@ -717,7 +708,6 @@ int sdl2_gl_flush_planes_batch(DisplayChangeListener *dcl,
     const QemuPlaneFlushInfo *primary_plane = NULL;
     int ret = 0;
     int i;
-    int primary_count = 0;
     int overlay_count = 0;
 
     assert(scon->opengl);
@@ -732,36 +722,15 @@ int sdl2_gl_flush_planes_batch(DisplayChangeListener *dcl,
         return -ENODEV;
     }
 
-    /* Timeout mechanism: Check if previous batch is still in progress
-     * If so, force emit the previous fence before starting a new batch */
-    if (scon->wayland_console->batch_in_progress && fence_id != 0) {
-        if (scon->wayland_console->batch_fence_id != 0) {
-            struct sdl2_console *sdlc = scon;
-            graphic_hw_gl_flush_done(sdlc->dcl.con, scon->wayland_console->batch_fence_id);
-        }
-    }
-
-    scon->wayland_console->batch_fence_id = fence_id;
-    scon->wayland_console->batch_total_planes = 0;
-    scon->wayland_console->batch_completed_planes = 0;
-    scon->wayland_console->batch_in_progress = (fence_id != 0);
-
-    /* Phase 1: Process all overlay planes first (subsurfaces)
-     * According to Wayland best practices, subsurfaces should be committed before the main surface */
+    /* Phase 1: Process overlay planes (subsurfaces) */
     for (i = 0; i < count; i++) {
         const QemuPlaneFlushInfo *plane = &planes[i];
 
         if (plane->type == QEMU_PLANE_TYPE_PRIMARY) {
-            /* Save primary plane info for later processing */
             if (!primary_plane) {
                 primary_plane = plane;
-                primary_count++;
-            } else {
-                fprintf(stderr, "sdl2_gl_flush_planes_batch: multiple primary planes not supported\n");
             }
-
         } else if (plane->type == QEMU_PLANE_TYPE_OVERLAY) {
-            /* Process overlay immediately */
             overlay_count++;
 
             sub = wayland_find_sub_window(scon->wayland_console, plane->overlay_id);
@@ -771,67 +740,35 @@ int sdl2_gl_flush_planes_batch(DisplayChangeListener *dcl,
                 continue;
             }
 
-            sub->in_batch = scon->wayland_console->batch_in_progress;
 
-            /* Commit overlay subsurface using existing Wayland function
-             * Note: wayland_flush_sub_window does NOT call wl_display_flush */
+            sub->flush_count = 0;
             ret = wayland_flush_sub_window(sub, plane->x, plane->y,
-                                          plane->width, plane->height,
-                                          fence_id);
+                                          plane->width, plane->height);
             if (ret < 0) {
                 fprintf(stderr, "sdl2_gl_flush_planes_batch: overlay id=%u flush failed: %d\n",
                         plane->overlay_id, ret);
-                sub->in_batch = false;
-                /* Continue with other planes even if one fails */
-            } else {
-                if (sub->in_batch) {
-                    scon->wayland_console->batch_total_planes++;
-                }
             }
         }
     }
 
-    /* Phase 2: Process primary plane (main surface) after all overlays
-     * This follows Wayland's z-order commit convention: subsurfaces first, then parent surface */
+    /* Phase 2: Process primary plane with fence registration */
     if (primary_plane) {
-        /* Use existing primary flush logic which handles:
-         * - GL context switching
-         * - Framebuffer blit
-         * - SDL_GL_SwapWindow (which calls wl_surface_commit on main surface)
-         * - Fence tracking with frame callback */
         ret = sdl2_gl_scanout_flush_fenced(dcl, primary_plane->x, primary_plane->y,
                                           primary_plane->width, primary_plane->height,
                                           fence_id);
         if (ret < 0) {
             fprintf(stderr, "sdl2_gl_flush_planes_batch: primary plane flush failed: %d\n", ret);
-        } else {
-            if (scon->wayland_console->batch_in_progress) {
-                scon->wayland_console->batch_total_planes++;
-            }
         }
 
-        /* Critical: Unified wl_display_flush for all committed surfaces
-         * This flushes both the subsurfaces (committed in Phase 1) and
-         * the main surface (committed by SDL_GL_SwapWindow above) */
-        if (scon->wayland_console) {
-            wayland_display_flush(scon->wayland_console);
+        wayland_display_flush(scon->wayland_console);
+    } else if (overlay_count > 0) {
+        /* No primary plane - register fence on main surface anyway */
+        if (fence_id != 0) {
+            wayland_register_fence(scon->wayland_console, fence_id);
         }
-    } else {
-        /* No primary plane, just flush overlays to Wayland */
-        if (overlay_count > 0 && scon->wayland_console) {
-            wayland_display_flush(scon->wayland_console);
-        }
+        wayland_display_flush(scon->wayland_console);
     }
 
-    if (scon->wayland_console->batch_in_progress && 
-        scon->wayland_console->batch_total_planes == 0 &&
-        fence_id != 0) {
-        scon->wayland_console->batch_in_progress = false;
-        scon->wayland_console->batch_fence_id = 0;
-        if (ret == 0) {
-            ret = -EAGAIN;
-        }
-    }
 
     return ret;
 }
