@@ -107,6 +107,7 @@ struct virtio_gpu_scanout {
     uint32_t resource_id;
     struct virtio_gpu_update_cursor cursor;
     QEMUCursor *current_cursor;
+    bool is_console_size_set_by_guest;
 };
 
 struct virtio_gpu_requested_state {

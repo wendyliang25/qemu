@@ -262,9 +262,30 @@ int virtio_gpu_update_dmabuf(VirtIOGPU *g,
     }
 
     g->dmabuf.primary[scanout_id] = new_primary;
-    qemu_console_resize(scanout->con,
-                        new_primary->buf.scanout_width,
-                        new_primary->buf.scanout_height);
+    /* Fix the size of the console/SDL main window.
+     * On Ubuntu DomainU, the full-screen app (either the desktop buffer or a
+     * full-screen application) will always be assigned to the virtual primary
+     * plane.
+     *
+     * On AAOS, apps assigned to the virtual primary plane are not necessarily
+     * full-screen; their dimensions may be smaller than the full screen. In
+     * this case, we need to copy this smaller-sized surface to the SDL main
+     * window surface. We must fix the size of the console/SDL main window
+     * because its dimensions will be used as the viewport size when calling
+     * glBlitFramebuffer for the copy. Otherwise, glBlitFramebuffer will lead to
+     * a distorted UI due to wrong viewport size.
+     *
+     * Note: With this patch, we will not honor resize requests from the guest
+     * side. In fact, there should be no such requests. The guest VM size should
+     * not change after we configure it in the QEMU boot configuration.
+     */
+    if (!scanout->is_console_size_set_by_guest) {
+        qemu_console_resize(scanout->con,
+                            new_primary->buf.scanout_width,
+                            new_primary->buf.scanout_height);
+
+        scanout->is_console_size_set_by_guest = true;
+    }
     dpy_gl_scanout_dmabuf(scanout->con, &new_primary->buf);
 
     if (old_primary) {
