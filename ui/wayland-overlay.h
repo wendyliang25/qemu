@@ -65,6 +65,9 @@ struct wayland_sub_window {
     bool framing;
     uint64_t fence;
 
+    /* Batch flush tracking - marks if this plane is part of a batch operation */
+    bool in_batch;
+
     QLIST_ENTRY(wayland_sub_window) next;
 
     struct wayland_console *wl_console;
@@ -107,6 +110,12 @@ struct wayland_console {
     struct wl_callback *main_frame_callback;
     uint64_t main_fence_id;
     bool main_framing;
+
+    /* Batch flush tracking for synchronized fence signaling */
+    uint64_t batch_fence_id;          /* Fence ID for current batch flush */
+    uint32_t batch_total_planes;      /* Total planes in current batch */
+    uint32_t batch_completed_planes;  /* Completed planes (frame callbacks received) */
+    bool batch_in_progress;           /* Whether a batch flush is in progress */
 };
 
 /* API function declarations */

@@ -732,6 +732,20 @@ int sdl2_gl_flush_planes_batch(DisplayChangeListener *dcl,
         return -ENODEV;
     }
 
+    /* Timeout mechanism: Check if previous batch is still in progress
+     * If so, force emit the previous fence before starting a new batch */
+    if (scon->wayland_console->batch_in_progress && fence_id != 0) {
+        if (scon->wayland_console->batch_fence_id != 0) {
+            struct sdl2_console *sdlc = scon;
+            graphic_hw_gl_flush_done(sdlc->dcl.con, scon->wayland_console->batch_fence_id);
+        }
+    }
+
+    scon->wayland_console->batch_fence_id = fence_id;
+    scon->wayland_console->batch_total_planes = 0;
+    scon->wayland_console->batch_completed_planes = 0;
+    scon->wayland_console->batch_in_progress = (fence_id != 0);
+
     /* Phase 1: Process all overlay planes first (subsurfaces)
      * According to Wayland best practices, subsurfaces should be committed before the main surface */
     for (i = 0; i < count; i++) {
@@ -757,6 +771,7 @@ int sdl2_gl_flush_planes_batch(DisplayChangeListener *dcl,
                 continue;
             }
 
+            sub->in_batch = scon->wayland_console->batch_in_progress;
 
             /* Commit overlay subsurface using existing Wayland function
              * Note: wayland_flush_sub_window does NOT call wl_display_flush */
@@ -766,7 +781,12 @@ int sdl2_gl_flush_planes_batch(DisplayChangeListener *dcl,
             if (ret < 0) {
                 fprintf(stderr, "sdl2_gl_flush_planes_batch: overlay id=%u flush failed: %d\n",
                         plane->overlay_id, ret);
+                sub->in_batch = false;
                 /* Continue with other planes even if one fails */
+            } else {
+                if (sub->in_batch) {
+                    scon->wayland_console->batch_total_planes++;
+                }
             }
         }
     }
@@ -784,6 +804,10 @@ int sdl2_gl_flush_planes_batch(DisplayChangeListener *dcl,
                                           fence_id);
         if (ret < 0) {
             fprintf(stderr, "sdl2_gl_flush_planes_batch: primary plane flush failed: %d\n", ret);
+        } else {
+            if (scon->wayland_console->batch_in_progress) {
+                scon->wayland_console->batch_total_planes++;
+            }
         }
 
         /* Critical: Unified wl_display_flush for all committed surfaces
@@ -796,6 +820,16 @@ int sdl2_gl_flush_planes_batch(DisplayChangeListener *dcl,
         /* No primary plane, just flush overlays to Wayland */
         if (overlay_count > 0 && scon->wayland_console) {
             wayland_display_flush(scon->wayland_console);
+        }
+    }
+
+    if (scon->wayland_console->batch_in_progress && 
+        scon->wayland_console->batch_total_planes == 0 &&
+        fence_id != 0) {
+        scon->wayland_console->batch_in_progress = false;
+        scon->wayland_console->batch_fence_id = 0;
+        if (ret == 0) {
+            ret = -EAGAIN;
         }
     }
 

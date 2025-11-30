@@ -350,11 +350,41 @@ static const struct wl_seat_listener seat_listener = {
     .name = seat_handle_name,
 };
 
+/* Check if all planes in the current batch have completed and signal fence if so */
+static void check_and_signal_batch_fence(struct wayland_console *console)
+{
+    if (!console || !console->batch_in_progress) {
+        return;
+    }
+
+    console->batch_completed_planes++;
+
+    if (console->batch_completed_planes >= console->batch_total_planes) {
+        if (console->batch_fence_id != 0) {
+            struct sdl2_console *sdlc = console->parent_console;
+            graphic_hw_gl_flush_done(sdlc->dcl.con, console->batch_fence_id);
+        }
+
+        console->batch_fence_id = 0;
+        console->batch_total_planes = 0;
+        console->batch_completed_planes = 0;
+        console->batch_in_progress = false;
+    }
+}
+
 static void sub_window_flush_done(struct wayland_sub_window *sub)
 {
     if (sub->valid) {
         struct sdl2_console *sdlc = sub->wl_console->parent_console;
-        graphic_hw_gl_flush_done(sdlc->dcl.con, sub->fence);
+        
+        /* Check if this sub-window is part of a batch operation */
+        if (sub->in_batch) {
+            check_and_signal_batch_fence(sub->wl_console);
+            sub->in_batch = false;
+        } else {
+            graphic_hw_gl_flush_done(sdlc->dcl.con, sub->fence);
+        }
+        
         sub->fence = 0;
     }
 }
@@ -363,12 +393,19 @@ static void main_surface_flush_done(struct wayland_console *console)
 {
     if (console->main_fence_id != 0) {
         struct sdl2_console *sdlc = console->parent_console;
-        graphic_hw_gl_flush_done(sdlc->dcl.con, console->main_fence_id);
+        
+        /* Check if main surface is part of a batch operation */
+        if (console->batch_in_progress) {
+            check_and_signal_batch_fence(console);
+        } else {
+            graphic_hw_gl_flush_done(sdlc->dcl.con, console->main_fence_id);
+        }
+        
         console->main_fence_id = 0;
     }
 }
 
-static void commit_buffer(struct wayland_sub_window *sub, uint64_t fence_id);
+static int commit_buffer(struct wayland_sub_window *sub, uint64_t fence_id);
 
 static void frame_handle_done(void *data, struct wl_callback *cb, uint32_t time)
 {
@@ -540,6 +577,12 @@ struct wayland_console *wayland_console_init(void *parent_console,
     console->main_frame_callback = NULL;
     console->main_fence_id = 0;
     console->main_framing = false;
+
+    /* Initialize batch flush tracking fields */
+    console->batch_fence_id = 0;
+    console->batch_total_planes = 0;
+    console->batch_completed_planes = 0;
+    console->batch_in_progress = false;
 
     /* Initialize Wayland event handling via QEMU main loop fd handler */
     console->wl_fd = wl_display_get_fd(display);
@@ -725,30 +768,39 @@ void wayland_update_dmabuf(struct wayland_sub_window *sub,
     sub->buffer_queued = true;
 }
 
-static void commit_buffer(struct wayland_sub_window *sub, uint64_t fence_id)
+static int commit_buffer(struct wayland_sub_window *sub, uint64_t fence_id)
 {
-    if (sub->buffer_queued) {
-        struct wayland_buffer *buf = wayland_dmabuf_to_buffer(sub);
-        if (buf != NULL) {
-            if (buf->wl_buffer) {
-                wl_surface_attach(sub->surface, buf->wl_buffer, 0, 0);
-                wl_surface_damage_buffer(sub->surface, 0, 0, buf->width, buf->height);
-
-                sub->fence = fence_id;
-                sub->frame_callback = wl_surface_frame(sub->surface);
-                // sub->frame_callback = wl_surface_frame(sub->wl_console->main_surface);
-                wl_callback_add_listener(sub->frame_callback, &frame_listener, sub);
-
-                sub->framing = true;
-
-                wl_surface_commit(sub->surface_proxy);
-                // wl_display_flush(sub->wl_console->display);
-            }
-        }
-        sub->buffer_queued = false;
-    } else {
-        fprintf(stderr, "[wayland] commit_buffer: buffer not queued for fd %d\n", sub->dmabuf->fd);
+    if (!sub->buffer_queued) {
+        fprintf(stderr, "[wayland] commit_buffer: buffer not queued for plane %u\n", sub->id);
+        return -EINVAL;
     }
+
+    struct wayland_buffer *buf = wayland_dmabuf_to_buffer(sub);
+    if (buf == NULL) {
+        fprintf(stderr, "[wayland] commit_buffer: failed to convert dmabuf to buffer for plane %u\n", sub->id);
+        sub->buffer_queued = false;
+        return -EINVAL;
+    }
+
+    if (!buf->wl_buffer) {
+        fprintf(stderr, "[wayland] commit_buffer: no wl_buffer for plane %u\n", sub->id);
+        sub->buffer_queued = false;
+        return -EINVAL;
+    }
+
+    wl_surface_attach(sub->surface, buf->wl_buffer, 0, 0);
+    wl_surface_damage_buffer(sub->surface, 0, 0, buf->width, buf->height);
+
+    sub->fence = fence_id;
+    sub->frame_callback = wl_surface_frame(sub->surface);
+    wl_callback_add_listener(sub->frame_callback, &frame_listener, sub);
+
+    sub->framing = true;
+
+    wl_surface_commit(sub->surface_proxy);
+    sub->buffer_queued = false;
+
+    return 0;
 }
 
 
@@ -756,6 +808,8 @@ int wayland_flush_sub_window(struct wayland_sub_window *sub,
                              uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                              uint64_t fence_id)
 {
+    int ret;
+
     if (!sub) {
         return -ENOENT;
     }
@@ -777,10 +831,14 @@ int wayland_flush_sub_window(struct wayland_sub_window *sub,
     }
 
     if (!sub->framing) {
-        commit_buffer(sub, fence_id);
+        ret = commit_buffer(sub, fence_id);
+        if (ret < 0) {
+            fprintf(stderr, "[wayland] flush_sub_window: commit_buffer failed for plane %u: %d\n",
+                    sub->id, ret);
+            return ret;
+        }
     } else {
-        fprintf(stderr, "[wayland] flush_sub_window %d already framing\n",
-                sub->dmabuf->fd);
+        fprintf(stderr, "[wayland] flush_sub_window plane %u already framing\n", sub->id);
         return -EAGAIN;
     }
     // wl_display_flush(sub->wl_console->display);
@@ -1037,6 +1095,7 @@ struct wayland_sub_window *wayland_create_sub_window(struct wayland_console *par
     sub->valid = true;
     sub->flush_count = 0;
     sub->framing = false;
+    sub->in_batch = false;
     sub->wl_console = parent;
     sub->event_queue =
         wl_display_create_queue_with_name(parent->display,
