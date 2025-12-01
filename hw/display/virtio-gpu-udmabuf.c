@@ -207,8 +207,8 @@ static VGPUDMABuf
     dmabuf->buf.y = r->y;
     dmabuf->buf.x_coord = res->x_coord;
     dmabuf->buf.y_coord = res->y_coord;
-    dmabuf->buf.scanout_width = res->w_pos;
-    dmabuf->buf.scanout_height = res->h_pos;
+    dmabuf->buf.scanout_width = r->width;
+    dmabuf->buf.scanout_height = r->height;
     dmabuf->buf.fourcc = qemu_pixman_to_drm_format(fb->format);
     dmabuf->buf.fd = qemu_dup(res->dmabuf_fd);
     dmabuf->buf.allow_fences = true;

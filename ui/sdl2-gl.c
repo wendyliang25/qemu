@@ -444,8 +444,7 @@ void sdl2_gl_scanout_dmabuf(DisplayChangeListener *dcl,
 
     sdl2_gl_scanout_texture(dcl, dmabuf->texture,
                             false, dmabuf->width, dmabuf->height,
-                            0, 0,
-                            dmabuf->w_pos, dmabuf->h_pos);
+                            0, 0, dmabuf->width, dmabuf->height);
 
     if (dmabuf->allow_fences) {
         scon->guest_fb.dmabuf = dmabuf;
