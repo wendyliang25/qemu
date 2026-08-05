@@ -271,6 +271,13 @@ accel_cmd_resource_create_blob(VirtIOGPU *g, struct virtio_gpu_ctrl_command *cmd
                                    cblob.nr_entries, cblob.size,
                                    cblob.hdr.ctx_id);
 
+    /* SVM blobs (contiguous guest-pfn mapping) are not supported yet. */
+    if (cblob.blob_flags & VIRTIO_GPU_BLOB_FLAG_USE_SVM) {
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: SVM blob not supported\n", __func__);
+        cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER;
+        return;
+    }
+
     res = virtio_gpu_find_resource(g, cblob.resource_id);
     if (res) {
         qemu_log_mask(LOG_GUEST_ERROR, "%s: resource already exists %d\n",
