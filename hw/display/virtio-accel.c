@@ -16,8 +16,20 @@
 #include "hw/virtio/virtio.h"
 #include "hw/virtio/virtio-gpu.h"
 #include "hw/virtio/virtio-gpu-bswap.h"
+#include "system/iothread.h"
 
 #include <vaccel.h>
+
+/*
+ * When running in a dedicated IOThread the BQL is not held by default, so
+ * operations that touch memory-region topology or QOM object state must
+ * acquire it explicitly.  On the main loop the BQL is already held, and
+ * calling bql_lock() again would deadlock.
+ */
+static inline bool accel_needs_bql(VirtIOAccel *accel)
+{
+    return accel->iothread != NULL;
+}
 
 struct accel_resource {
     struct virtio_gpu_simple_resource base;
@@ -123,11 +135,18 @@ static void virtio_accel_realize(DeviceState *qdev, Error **errp)
     VirtIOAccel *accel = VIRTIO_ACCEL(g);
     int ret;
 
+    /* Resolve the AioContext: use a dedicated IOThread when configured,
+     * otherwise fall back to the global main-loop context. */
+    accel->ctx = accel->iothread
+                 ? iothread_get_aio_context(accel->iothread)
+                 : qemu_get_aio_context();
+
     /* Set up the fence-completion BH before any context (hence polling thread)
-     * can exist and call accel_write_context_fence(). */
+     * can exist and call accel_write_context_fence(). The BH is created on
+     * accel->ctx so completions are processed by the same thread that owns the
+     * control queue. */
     QSLIST_INIT(&accel->async_fenceq);
-    accel->fence_bh = aio_bh_new(qemu_get_aio_context(),
-                                 accel_context_fence_bh, g);
+    accel->fence_bh = aio_bh_new(accel->ctx, accel_context_fence_bh, g);
 
     bdev->virtio_config.num_capsets = 1;
     bdev->conf.max_outputs = 0;
@@ -143,6 +162,30 @@ static void virtio_accel_realize(DeviceState *qdev, Error **errp)
     }
 
     virtio_gpu_device_realize(qdev, errp);
+    if (*errp) {
+        return;
+    }
+
+    /*
+     * When a dedicated IOThread is configured, move the ctrl virtqueue
+     * host notifier to that thread's AioContext.  This decouples accel
+     * command processing from the virtio-gpu main-loop thread so heavy
+     * NPU traffic no longer blocks GPU rendering.
+     *
+     * This is safe because virtio-accel:
+     *  - has no GL-context thread affinity (never calls virglrenderer/EGL)
+     *  - has no interaction with the ui/ display subsystem (max_outputs=0)
+     *  - uses libvaccel which has no thread-affinity requirement
+     * BQL protection is still required around memory-topology and QOM
+     * operations (see accel_needs_bql), but the fast submit path runs
+     * without the BQL for maximum concurrency with virtio-gpu.
+     */
+    if (accel->iothread) {
+        aio_context_acquire(accel->ctx);
+        virtio_queue_aio_attach_host_notifier(g->ctrl_vq, accel->ctx);
+        aio_context_release(accel->ctx);
+        virtio_device_start_ioeventfd(VIRTIO_DEVICE(g));
+    }
 }
 
 static void virtio_accel_unrealize(DeviceState *qdev)
@@ -150,6 +193,14 @@ static void virtio_accel_unrealize(DeviceState *qdev)
     VirtIOGPU *g = VIRTIO_GPU(qdev);
     VirtIOAccel *accel = VIRTIO_ACCEL(g);
     struct accel_context_fence *f;
+
+    /* Detach the ctrl virtqueue from the IOThread before tearing down. */
+    if (accel->iothread) {
+        aio_context_acquire(accel->ctx);
+        virtio_queue_aio_detach_host_notifier(g->ctrl_vq, accel->ctx);
+        aio_context_release(accel->ctx);
+        virtio_device_stop_ioeventfd(VIRTIO_DEVICE(g));
+    }
 
     /*
      * Do not assume the guest tore its contexts down first (hot-unplug, abrupt
@@ -248,6 +299,7 @@ accel_cmd_resource_create_blob(VirtIOGPU *g, struct virtio_gpu_ctrl_command *cmd
     struct vaccel_create_resource_blob_args vaccel_args = { 0 };
     struct virtio_gpu_resource_create_blob cblob;
     struct virtio_gpu_simple_resource *res;
+    VirtIOAccel *accel = VIRTIO_ACCEL(g);
     int ret;
 
     if (!virtio_gpu_blob_enabled(g->parent_obj.conf)) {
@@ -276,9 +328,15 @@ accel_cmd_resource_create_blob(VirtIOGPU *g, struct virtio_gpu_ctrl_command *cmd
     res->blob_size = cblob.size;
 
     if (cblob.blob_mem == VIRTIO_GPU_BLOB_MEM_GUEST) {
-         ret = virtio_gpu_create_mapping_iov(g, cblob.nr_entries, sizeof(cblob),
-                                             cmd, &res->addrs,
+        if (accel_needs_bql(accel)) {
+            bql_lock();
+        }
+        ret = virtio_gpu_create_mapping_iov(g, cblob.nr_entries, sizeof(cblob),
+                                            cmd, &res->addrs,
                                             &res->iov, &res->iov_cnt);
+        if (accel_needs_bql(accel)) {
+            bql_unlock();
+        }
         if (ret) {
             qemu_log_mask(LOG_GUEST_ERROR, "%s: create_mapping_iov failed: res=%d, "
                     "nr_entries=%d, size=%ld, ret=%d\n",
@@ -311,13 +369,25 @@ accel_cmd_resource_create_blob(VirtIOGPU *g, struct virtio_gpu_ctrl_command *cmd
 
     trace_virtio_accel_cmd_resource_create_blob(cblob.resource_id, cblob.hdr.ctx_id, cblob.blob_id, cblob.blob_flags, cblob.blob_mem, cblob.size);
 
+    if (accel_needs_bql(accel)) {
+        bql_lock();
+    }
     QTAILQ_INSERT_HEAD(&g->reslist, res, next);
+    if (accel_needs_bql(accel)) {
+        bql_unlock();
+    }
     res = NULL;
 
     return;
 
 cleanup_mapping:
+    if (accel_needs_bql(accel)) {
+        bql_lock();
+    }
     virtio_gpu_cleanup_mapping(g, res);
+    if (accel_needs_bql(accel)) {
+        bql_unlock();
+    }
     g_free(res);
     return;
 }
@@ -332,6 +402,7 @@ static void accel_cmd_resource_map_blob(VirtIOGPU *g, struct virtio_gpu_ctrl_com
     uint64_t size;
     struct virtio_gpu_resp_map_info resp;
     VirtIOGPUBase *b = VIRTIO_GPU_BASE(g);
+    VirtIOAccel *accel = VIRTIO_ACCEL(g);
 
     VIRTIO_GPU_FILL_CMD(mblob);
     virtio_gpu_map_blob_bswap(&mblob);
@@ -362,6 +433,7 @@ static void accel_cmd_resource_map_blob(VirtIOGPU *g, struct virtio_gpu_ctrl_com
         return;
     }
 
+    /* vaccel_resource_map has no BQL requirement; keep it outside the lock. */
     ret = vaccel_resource_map(g, vres->base.resource_id, &data, &size);
     if (ret) {
         qemu_log_mask(LOG_GUEST_ERROR, "%s: resource map error: %s\n",
@@ -370,8 +442,19 @@ static void accel_cmd_resource_map_blob(VirtIOGPU *g, struct virtio_gpu_ctrl_com
         return;
     }
 
+    /*
+     * Memory-region topology changes and QOM object creation require the BQL.
+     * Take it only when running in an IOThread; on the main loop it is already
+     * held and taking it again would deadlock.
+     */
+    if (accel_needs_bql(accel)) {
+        bql_lock();
+    }
     vres->region = MEMORY_REGION(object_new(TYPE_MEMORY_REGION));
     if (!vres->region) {
+        if (accel_needs_bql(accel)) {
+            bql_unlock();
+        }
         qemu_log_mask(LOG_GUEST_ERROR, "%s: failed to create memory region\n", __func__);
         cmd->error = VIRTIO_GPU_RESP_ERR_UNSPEC;
         return;
@@ -381,6 +464,9 @@ static void accel_cmd_resource_map_blob(VirtIOGPU *g, struct virtio_gpu_ctrl_com
     memory_region_init_ram_ptr(mr, OBJECT(mr), "blob", size, data);
     memory_region_add_subregion(&b->hostmem, mblob.offset, mr);
     memory_region_set_enabled(mr, true);
+    if (accel_needs_bql(accel)) {
+        bql_unlock();
+    }
 
     memset(&resp, 0, sizeof(resp));
     resp.hdr.type = VIRTIO_GPU_RESP_OK_MAP_INFO;
@@ -395,6 +481,7 @@ static void accel_cmd_resource_unmap_blob(VirtIOGPU *g, struct virtio_gpu_ctrl_c
     struct accel_resource *vres;
     struct virtio_gpu_resource_unmap_blob ublob;
     VirtIOGPUBase *b = VIRTIO_GPU_BASE(g);
+    VirtIOAccel *accel = VIRTIO_ACCEL(g);
     MemoryRegion *mr;
     int ret;
 
@@ -430,9 +517,15 @@ static void accel_cmd_resource_unmap_blob(VirtIOGPU *g, struct virtio_gpu_ctrl_c
     }
 
     mr = vres->region;
+    if (accel_needs_bql(accel)) {
+        bql_lock();
+    }
     memory_region_set_enabled(mr, false);
     memory_region_del_subregion(&b->hostmem, mr);
     object_unparent(OBJECT(mr));
+    if (accel_needs_bql(accel)) {
+        bql_unlock();
+    }
 
     vres->region = NULL;
 }
@@ -443,6 +536,7 @@ static void accel_cmd_resource_unref(VirtIOGPU *g,
     struct virtio_gpu_resource_unref unref;
     struct virtio_gpu_simple_resource *res;
     struct iovec *res_iovs = NULL;
+    VirtIOAccel *accel = VIRTIO_ACCEL(g);
     uint32_t num_iovs = 0;
 
     VIRTIO_GPU_FILL_CMD(unref);
@@ -459,12 +553,18 @@ static void accel_cmd_resource_unref(VirtIOGPU *g,
     vaccel_detach_resource_blob(g, unref.resource_id,
                                        &res_iovs,
                                        &num_iovs);
+    vaccel_destroy_resource_blob(g, unref.resource_id);
+
+    if (accel_needs_bql(accel)) {
+        bql_lock();
+    }
     if (res_iovs != NULL && num_iovs != 0) {
         virtio_gpu_cleanup_mapping_iov(g, res_iovs, num_iovs);
     }
-
-    vaccel_destroy_resource_blob(g, unref.resource_id);
     QTAILQ_REMOVE(&g->reslist, res, next);
+    if (accel_needs_bql(accel)) {
+        bql_unlock();
+    }
     g_free(res);
 }
 
@@ -585,6 +685,8 @@ static void virtio_accel_handle_ctrl(VirtIODevice *vdev, VirtQueue *vq)
 static const Property virtio_accel_properties[] = {
     DEFINE_PROP_STRING("accel-node", VirtIOAccel,
                        accel_node),
+    DEFINE_PROP_LINK("iothread", VirtIOAccel, iothread,
+                     TYPE_IOTHREAD, IOThread *),
 };
 
 static void virtio_accel_class_init(ObjectClass *klass, const void *data)
