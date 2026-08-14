@@ -636,10 +636,19 @@ virtio_accel_process_cmd(VirtIOGPU *g,
     virtio_gpu_ctrl_response_nodata(g, cmd, VIRTIO_GPU_RESP_OK_NODATA);
 }
 
+/*
+ * Max commands processed per ctrl_bh run before yielding. Draining the whole
+ * queue in one BH can starve other devices' BHs (notably a co-located
+ * virtio-gpu's rendering), so after this many commands we reschedule ctrl_bh and
+ * return, letting the main loop service other work before we resume draining.
+ */
+#define VIRTIO_ACCEL_CTRL_BUDGET 16
+
 static void virtio_accel_handle_ctrl(VirtIODevice *vdev, VirtQueue *vq)
 {
     VirtIOGPU *g = VIRTIO_GPU(vdev);
     struct virtio_gpu_ctrl_command *cmd;
+    unsigned int processed = 0;
 
     if (!virtio_queue_ready(vq)) {
         return;
@@ -652,6 +661,16 @@ static void virtio_accel_handle_ctrl(VirtIODevice *vdev, VirtQueue *vq)
         cmd->finished = false;
         QTAILQ_INSERT_TAIL(&g->cmdq, cmd, next);
         virtio_gpu_process_cmdq(g);
+
+        if (++processed >= VIRTIO_ACCEL_CTRL_BUDGET) {
+            /*
+             * Yield: reschedule ourselves so pending BHs (e.g. virtio-gpu's
+             * ctrl_bh) get to run, then resume draining the queue on the next
+             * ctrl_bh invocation.
+             */
+            qemu_bh_schedule(g->ctrl_bh);
+            break;
+        }
         cmd = virtqueue_pop(vq, sizeof(struct virtio_gpu_ctrl_command));
     }
 }
