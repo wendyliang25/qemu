@@ -14,10 +14,21 @@
 #include "qemu/main-loop.h"
 #include "trace.h"
 #include "hw/virtio/virtio.h"
+#include "hw/virtio/virtio-bus.h"
 #include "hw/virtio/virtio-gpu.h"
 #include "hw/virtio/virtio-gpu-bswap.h"
+#include "hw/qdev-properties.h"
+#include "system/iothread.h"
+#include "block/aio-wait.h"
 
 #include <vaccel.h>
+
+/*
+ * Control + cursor queues, as created by virtio_gpu_base_device_realize(). Must
+ * match the number of virtqueues the base device creates; start/stop_ioeventfd
+ * iterate [0, VIRTIO_ACCEL_NVQS).
+ */
+#define VIRTIO_ACCEL_NVQS 2
 
 struct accel_resource {
     struct virtio_gpu_simple_resource base;
@@ -54,9 +65,11 @@ static int accel_get_drm_fd(void *opaque)
 }
 
 /*
- * Drain fence completions queued by accel_write_context_fence(). Runs as a
- * bottom half on the main loop, so the BQL is held and it is safe to touch
- * g->fenceq and the virtqueue here.
+ * Drain fence completions queued by accel_write_context_fence(). Runs on
+ * accel->ctx (the iothread when configured, else the main loop), which is the
+ * single owner of g->fenceq / g->inflight; the ctrl path runs on the same
+ * context, so no lock is needed. virtqueue_push()/virtio_notify() (via
+ * virtio_gpu_ctrl_response_nodata) are RCU/atomic-safe off the BQL.
  */
 static void accel_context_fence_bh(void *opaque)
 {
@@ -116,6 +129,20 @@ static struct vaccel_callbacks vaccel_cbs = {
     .write_context_fence = accel_write_context_fence,
 };
 
+/*
+ * Control-queue bottom half, bound to accel->ctx (the iothread when configured).
+ * Replaces the base virtio_gpu_ctrl_bh. Command processing runs without the BQL;
+ * the handlers that manipulate memory regions / DMA / g->reslist bounce those
+ * sections to the main loop (see accel_run_on_main).
+ */
+static void virtio_accel_ctrl_bh(void *opaque)
+{
+    VirtIOGPU *g = opaque;
+    VirtIOGPUClass *vgc = VIRTIO_GPU_GET_CLASS(g);
+
+    vgc->handle_ctrl(VIRTIO_DEVICE(g), g->ctrl_vq);
+}
+
 static void virtio_accel_realize(DeviceState *qdev, Error **errp)
 {
     ERRP_GUARD();
@@ -131,25 +158,59 @@ static void virtio_accel_realize(DeviceState *qdev, Error **errp)
     bdev->conf.flags |= (1 << VIRTIO_GPU_FLAG_DMABUF_ENABLED);
     bdev->conf.flags |= (1 << VIRTIO_GPU_FLAG_CONTEXT_INIT_ENABLED);
 
+    /*
+     * Resolve the AioContext used for command and fence processing. With a
+     * dedicated iothread this is off the main loop; otherwise it is the main
+     * loop and behaviour is unchanged.
+     */
+    if (accel->iothread) {
+        accel->ctx = iothread_get_aio_context(accel->iothread);
+        object_ref(OBJECT(accel->iothread));
+    } else {
+        accel->ctx = qemu_get_aio_context();
+    }
+
     /* Set up the fence-completion BH before any context (hence polling thread)
      * can exist and call accel_write_context_fence(). */
     QSLIST_INIT(&accel->async_fenceq);
-    accel->fence_bh = aio_bh_new(qemu_get_aio_context(),
-                                 accel_context_fence_bh, g);
+    accel->fence_bh = aio_bh_new(accel->ctx, accel_context_fence_bh, g);
 
     ret = vaccel_create(g, VIRACCEL_CAPSET_ID_AMDXDNA, &vaccel_cbs);
     if (ret) {
         error_setg(errp, "Init specified accel device failed");
-        qemu_bh_delete(accel->fence_bh);
-        accel->fence_bh = NULL;
-        return;
+        goto err;
     }
 
     virtio_gpu_device_realize(qdev, errp);
     if (*errp) {
         vaccel_destroy(g);
-        qemu_bh_delete(accel->fence_bh);
-        accel->fence_bh = NULL;
+        goto err;
+    }
+
+    /*
+     * With an iothread, move the base control BH (created on the main loop by
+     * virtio_gpu_device_realize()) onto the iothread's AioContext, so the BH and
+     * command processing run off the main loop.
+     *
+     * The base BH is guarded by the transport's mem_reentrancy_guard, but that
+     * guard is a per-device flag shared with MMIO dispatch and is not
+     * thread-aware: while a guarded BH runs it sets engaged_in_io, and a
+     * concurrent guest notify MMIO to the same device (on a vCPU/main thread)
+     * would then be blocked and dropped, wedging the queue. Since this BH runs
+     * on a dedicated iothread concurrently with guest MMIO, it must be
+     * unguarded (as virtio dataplane devices are on their iothread path).
+     */
+    if (accel->iothread) {
+        qemu_bh_delete(g->ctrl_bh);
+        g->ctrl_bh = aio_bh_new(accel->ctx, virtio_accel_ctrl_bh, g);
+    }
+    return;
+
+err:
+    qemu_bh_delete(accel->fence_bh);
+    accel->fence_bh = NULL;
+    if (accel->iothread) {
+        object_unref(OBJECT(accel->iothread));
     }
 }
 
@@ -176,6 +237,10 @@ static void virtio_accel_unrealize(DeviceState *qdev)
     while ((f = QSLIST_FIRST(&accel->async_fenceq))) {
         QSLIST_REMOVE_HEAD(&accel->async_fenceq, next);
         g_free(f);
+    }
+
+    if (accel->iothread) {
+        object_unref(OBJECT(accel->iothread));
     }
 }
 
@@ -555,6 +620,63 @@ out:
     g_free(buf);
 }
 
+typedef void (*accel_cmd_fn)(VirtIOGPU *g, struct virtio_gpu_ctrl_command *cmd);
+
+struct accel_bounce {
+    VirtIOGPU *g;
+    struct virtio_gpu_ctrl_command *cmd;
+    accel_cmd_fn fn;
+    QemuEvent done;
+};
+
+static void accel_bounce_bh(void *opaque)
+{
+    struct accel_bounce *b = opaque;
+
+    /* Main-loop BHs run with the BQL already held; do not re-acquire it. */
+    b->fn(b->g, b->cmd);
+    qemu_event_set(&b->done);
+}
+
+/*
+ * Run a command handler that manipulates memory regions / DMA / g->reslist on
+ * the main loop under the BQL (those operations assert bql_locked()). When
+ * already on the main-loop AioContext (no iothread configured) call directly.
+ * From the iothread, schedule the body on the main loop and wait: the BH runs
+ * under the BQL that the main loop already holds. This is the sanctioned
+ * iothread->main-loop wait direction (block/aio-wait.h), and it is deadlock-free
+ * against stop_ioeventfd because the main thread services this BH from within
+ * its own aio_poll() while it drains the iothread. cmd->error / cmd->finished
+ * written in the BH are published by qemu_event_wait().
+ */
+static void accel_run_on_main(VirtIOGPU *g, struct virtio_gpu_ctrl_command *cmd,
+                              accel_cmd_fn fn)
+{
+    struct accel_bounce b;
+
+    if (qemu_get_current_aio_context() == qemu_get_aio_context()) {
+        fn(g, cmd);
+        return;
+    }
+
+    b.g = g;
+    b.cmd = cmd;
+    b.fn = fn;
+    qemu_event_init(&b.done, false);
+    aio_bh_schedule_oneshot(qemu_get_aio_context(), accel_bounce_bh, &b);
+    qemu_event_wait(&b.done);
+    qemu_event_destroy(&b.done);
+}
+
+/* accel_cmd_fn adapter: accel never sets cmd_suspended, so ignore it. */
+static void accel_cmd_resource_unmap_blob_fn(VirtIOGPU *g,
+                                             struct virtio_gpu_ctrl_command *cmd)
+{
+    bool cmd_suspended = false;
+
+    accel_cmd_resource_unmap_blob(g, cmd, &cmd_suspended);
+}
+
 static void
 virtio_accel_process_cmd(VirtIOGPU *g,
                          struct virtio_gpu_ctrl_command *cmd)
@@ -578,21 +700,27 @@ virtio_accel_process_cmd(VirtIOGPU *g,
     case VIRTIO_GPU_CMD_CTX_DESTROY:
         accel_cmd_ctx_destroy(g, cmd);
         break;
+    /*
+     * The RESOURCE_* commands manipulate memory regions / DMA mappings /
+     * g->reslist, which require the BQL and main-loop ownership. Bounce their
+     * bodies to the main loop; the surrounding cmdq/fenceq bookkeeping stays on
+     * accel->ctx.
+     */
     case VIRTIO_GPU_CMD_RESOURCE_CREATE_BLOB:
-        accel_cmd_resource_create_blob(g, cmd);
+        accel_run_on_main(g, cmd, accel_cmd_resource_create_blob);
         break;
     case VIRTIO_GPU_CMD_RESOURCE_MAP_BLOB:
-        accel_cmd_resource_map_blob(g, cmd);
+        accel_run_on_main(g, cmd, accel_cmd_resource_map_blob);
         break;
     case VIRTIO_GPU_CMD_RESOURCE_UNMAP_BLOB:
-        accel_cmd_resource_unmap_blob(g, cmd, &cmd_suspended);
+        accel_run_on_main(g, cmd, accel_cmd_resource_unmap_blob_fn);
         break;
     case VIRTIO_GPU_CMD_CTX_ATTACH_RESOURCE:
         break;
     case VIRTIO_GPU_CMD_CTX_DETACH_RESOURCE:
         break;
     case VIRTIO_GPU_CMD_RESOURCE_UNREF:
-        accel_cmd_resource_unref(g, cmd);
+        accel_run_on_main(g, cmd, accel_cmd_resource_unref);
         break;
     case VIRTIO_GPU_CMD_SUBMIT_3D:
         accel_cmd_submit(g, cmd);
@@ -637,16 +765,20 @@ virtio_accel_process_cmd(VirtIOGPU *g,
 }
 
 /*
- * Max commands processed per ctrl_bh run before yielding. Draining the whole
- * queue in one BH can starve other devices' BHs (notably a co-located
- * virtio-gpu's rendering), so after this many commands we reschedule ctrl_bh and
- * return, letting the main loop service other work before we resume draining.
+ * Max commands processed per ctrl_bh run before yielding, when running on the
+ * shared main-loop AioContext (no iothread configured). There, draining the
+ * whole queue in one BH can starve other devices' BHs (notably virtio-gpu
+ * rendering), so after this many commands we reschedule ctrl_bh and return,
+ * letting the main loop service other work before we resume draining. With a
+ * dedicated iothread the ctrl BH owns its own AioContext and there is nothing to
+ * yield to, so no budget is applied.
  */
 #define VIRTIO_ACCEL_CTRL_BUDGET 16
 
 static void virtio_accel_handle_ctrl(VirtIODevice *vdev, VirtQueue *vq)
 {
     VirtIOGPU *g = VIRTIO_GPU(vdev);
+    VirtIOAccel *accel = VIRTIO_ACCEL(g);
     struct virtio_gpu_ctrl_command *cmd;
     unsigned int processed = 0;
 
@@ -662,11 +794,11 @@ static void virtio_accel_handle_ctrl(VirtIODevice *vdev, VirtQueue *vq)
         QTAILQ_INSERT_TAIL(&g->cmdq, cmd, next);
         virtio_gpu_process_cmdq(g);
 
-        if (++processed >= VIRTIO_ACCEL_CTRL_BUDGET) {
+        if (!accel->iothread && ++processed >= VIRTIO_ACCEL_CTRL_BUDGET) {
             /*
-             * Yield: reschedule ourselves so pending BHs (e.g. virtio-gpu's
-             * ctrl_bh) get to run, then resume draining the queue on the next
-             * ctrl_bh invocation.
+             * Main-loop only: reschedule ourselves so pending BHs (e.g.
+             * virtio-gpu's ctrl_bh) get to run, then resume draining the queue
+             * on the next ctrl_bh invocation.
              */
             qemu_bh_schedule(g->ctrl_bh);
             break;
@@ -675,9 +807,148 @@ static void virtio_accel_handle_ctrl(VirtIODevice *vdev, VirtQueue *vq)
     }
 }
 
+/* Detach a queue's host notifier; runs in that queue's AioContext. */
+static void virtio_accel_ioeventfd_stop_vq_bh(void *opaque)
+{
+    VirtQueue *vq = opaque;
+    EventNotifier *host_notifier = virtio_queue_get_host_notifier(vq);
+
+    virtio_queue_aio_detach_host_notifier(vq, qemu_get_current_aio_context());
+    /* Drain any pending notification the poll callback may have missed. */
+    virtio_queue_host_notifier_read(host_notifier);
+}
+
+/*
+ * Start ioeventfd-based virtqueue processing. The control queue's host notifier
+ * is attached to accel->ctx (the iothread when configured, else the main loop),
+ * so its processing runs off the main loop; the cursor queue stays on the main
+ * loop. With no iothread accel->ctx is the main loop, so this matches the
+ * default host-notifier behaviour. Context: BQL held.
+ */
+static int virtio_accel_start_ioeventfd(VirtIODevice *vdev)
+{
+    VirtIOGPU *g = VIRTIO_GPU(vdev);
+    VirtIOAccel *accel = VIRTIO_ACCEL(g);
+    BusState *qbus = qdev_get_parent_bus(DEVICE(vdev));
+    VirtioBusClass *k = VIRTIO_BUS_GET_CLASS(qbus);
+    int r, i, j;
+
+    if (accel->ioeventfd_started) {
+        return 0;
+    }
+
+    r = k->set_guest_notifiers(qbus->parent, VIRTIO_ACCEL_NVQS, true);
+    if (r != 0) {
+        error_report("virtio-accel: failed to set guest notifiers (%d), "
+                     "ensure the accelerator supports irqfd", r);
+        return r;
+    }
+
+    /* Batch host-notifier changes into one memory transaction. */
+    memory_region_transaction_begin();
+    for (i = 0; i < VIRTIO_ACCEL_NVQS; i++) {
+        r = virtio_bus_set_host_notifier(VIRTIO_BUS(qbus), i, true);
+        if (r != 0) {
+            j = i;
+            while (i--) {
+                virtio_bus_set_host_notifier(VIRTIO_BUS(qbus), i, false);
+            }
+            memory_region_transaction_commit();
+            while (j--) {
+                virtio_bus_cleanup_host_notifier(VIRTIO_BUS(qbus), j);
+            }
+            k->set_guest_notifiers(qbus->parent, VIRTIO_ACCEL_NVQS, false);
+            return r;
+        }
+    }
+    memory_region_transaction_commit();
+
+    accel->ioeventfd_started = true;
+
+    virtio_queue_aio_attach_host_notifier(g->ctrl_vq, accel->ctx);
+    virtio_queue_aio_attach_host_notifier(g->cursor_vq, qemu_get_aio_context());
+    return 0;
+}
+
+/* Context: BQL held. */
+static void virtio_accel_stop_ioeventfd(VirtIODevice *vdev)
+{
+    VirtIOGPU *g = VIRTIO_GPU(vdev);
+    VirtIOAccel *accel = VIRTIO_ACCEL(g);
+    BusState *qbus = qdev_get_parent_bus(DEVICE(vdev));
+    VirtioBusClass *k = VIRTIO_BUS_GET_CLASS(qbus);
+    int i;
+
+    if (!accel->ioeventfd_started) {
+        return;
+    }
+
+    /* Detach each queue's host notifier from within its own AioContext. */
+    aio_wait_bh_oneshot(accel->ctx, virtio_accel_ioeventfd_stop_vq_bh,
+                        g->ctrl_vq);
+    aio_wait_bh_oneshot(qemu_get_aio_context(), virtio_accel_ioeventfd_stop_vq_bh,
+                        g->cursor_vq);
+
+    memory_region_transaction_begin();
+    for (i = 0; i < VIRTIO_ACCEL_NVQS; i++) {
+        virtio_bus_set_host_notifier(VIRTIO_BUS(qbus), i, false);
+    }
+    memory_region_transaction_commit();
+
+    for (i = 0; i < VIRTIO_ACCEL_NVQS; i++) {
+        virtio_bus_cleanup_host_notifier(VIRTIO_BUS(qbus), i);
+    }
+
+    accel->ioeventfd_started = false;
+    k->set_guest_notifiers(qbus->parent, VIRTIO_ACCEL_NVQS, false);
+}
+
+/*
+ * Drain g->cmdq / g->fenceq / g->inflight. Mirrors the inline drain in base
+ * virtio_gpu_reset(); run on accel->ctx (see virtio_accel_reset) so the queues,
+ * which are owned by the iothread, are not touched concurrently.
+ */
+static void virtio_accel_reset_drain_bh(void *opaque)
+{
+    VirtIOGPU *g = opaque;
+    struct virtio_gpu_ctrl_command *cmd;
+
+    while (!QTAILQ_EMPTY(&g->cmdq)) {
+        cmd = QTAILQ_FIRST(&g->cmdq);
+        QTAILQ_REMOVE(&g->cmdq, cmd, next);
+        g_free(cmd);
+    }
+    while (!QTAILQ_EMPTY(&g->fenceq)) {
+        cmd = QTAILQ_FIRST(&g->fenceq);
+        QTAILQ_REMOVE(&g->fenceq, cmd, next);
+        g->inflight--;
+        g_free(cmd);
+    }
+}
+
+/*
+ * Base virtio_gpu_reset() drains cmdq/fenceq inline on the calling (main/vCPU)
+ * thread, which would race the iothread that owns them. The bus stops ioeventfd
+ * before reset, so the ctrl notifier is already detached; drain the queues on
+ * accel->ctx first, then let the base reset run (it now finds them empty and
+ * still destroys resources on the main loop under the BQL).
+ */
+static void virtio_accel_reset(VirtIODevice *vdev)
+{
+    VirtIOGPU *g = VIRTIO_GPU(vdev);
+    VirtIOAccel *accel = VIRTIO_ACCEL(g);
+
+    if (accel->iothread) {
+        aio_wait_bh_oneshot(accel->ctx, virtio_accel_reset_drain_bh, g);
+    }
+    virtio_gpu_reset(vdev);
+}
+
 static const Property virtio_accel_properties[] = {
     DEFINE_PROP_STRING("accel-node", VirtIOAccel,
                        accel_node),
+    DEFINE_PROP_LINK("iothread", VirtIOAccel, iothread, TYPE_IOTHREAD,
+                     IOThread *),
 };
 
 static void virtio_accel_class_init(ObjectClass *klass, const void *data)
@@ -690,6 +961,9 @@ static void virtio_accel_class_init(ObjectClass *klass, const void *data)
     vgc->process_cmd = virtio_accel_process_cmd;
     vdc->realize = virtio_accel_realize;
     vdc->unrealize = virtio_accel_unrealize;
+    vdc->reset = virtio_accel_reset;
+    vdc->start_ioeventfd = virtio_accel_start_ioeventfd;
+    vdc->stop_ioeventfd = virtio_accel_stop_ioeventfd;
     device_class_set_props(dc, virtio_accel_properties);
 }
 

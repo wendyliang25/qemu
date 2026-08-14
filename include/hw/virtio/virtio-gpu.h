@@ -320,9 +320,21 @@ struct accel_context_fence {
     QSLIST_ENTRY(accel_context_fence) next;
 };
 
+typedef struct IOThread IOThread;
+
 struct VirtIOAccel {
     VirtIOGPU parent_obj;
     char *accel_node;
+
+    /*
+     * Optional dedicated iothread. When set, the control queue's ioeventfd is
+     * attached to that thread's AioContext (ctx) so command processing runs off
+     * the main loop, reducing contention with a co-located virtio-gpu device.
+     * When unset, ctx is the main-loop AioContext and behaviour is unchanged.
+     */
+    IOThread *iothread;
+    AioContext *ctx;
+    bool ioeventfd_started;
 
     /*
      * Fence completions are delivered on the vaccel fence-polling thread, which
@@ -330,7 +342,9 @@ struct VirtIOAccel {
      * the BQL) directly: ctx teardown joins that thread while holding the BQL, so
      * grabbing the BQL from the callback would deadlock. The callback instead
      * pushes onto this lock-free list and schedules fence_bh, which drains it on
-     * the main loop under the BQL. Mirrors virgl's async_fenceq/async_fence_bh.
+     * ctx (the iothread when configured). fence_bh runs without the BQL as the
+     * single owner of g->fenceq / g->inflight; the ctrl path runs on the same
+     * ctx, so no lock is needed. Mirrors virgl's async_fenceq/async_fence_bh.
      */
     QEMUBH *fence_bh;
     QSLIST_HEAD(, accel_context_fence) async_fenceq;
