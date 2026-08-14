@@ -26,6 +26,7 @@
 #include "standard-headers/linux/virtio_gpu.h"
 #include "standard-headers/linux/virtio_ids.h"
 #include "qom/object.h"
+#include "system/iothread.h"
 
 #define TYPE_VIRTIO_GPU_BASE "virtio-gpu-base"
 OBJECT_DECLARE_TYPE(VirtIOGPUBase, VirtIOGPUBaseClass,
@@ -317,12 +318,26 @@ struct VirtIOAccel {
     char *accel_node;
 
     /*
+     * Optional IOThread for control-queue processing.  When set, the ctrl
+     * virtqueue host notifier is bound to iothread's AioContext so command
+     * processing runs on the IOThread instead of the main loop.  This is safe
+     * because virtio-accel has no GL-context affinity (it never calls into
+     * virglrenderer/OpenGL/EGL) and no interaction with the ui/ display
+     * subsystem (max_outputs == 0, no scanout, no DMABUF-to-display).
+     * libvaccel has no thread-affinity requirement.  When iothread is NULL,
+     * behaviour is identical to the original: everything runs on the main loop.
+     */
+    IOThread   *iothread;
+    AioContext *ctx;
+
+    /*
      * Fence completions are delivered on the vaccel fence-polling thread, which
      * is not a QEMU thread and must not touch g->fenceq / the virtqueue (or take
      * the BQL) directly: ctx teardown joins that thread while holding the BQL, so
      * grabbing the BQL from the callback would deadlock. The callback instead
      * pushes onto this lock-free list and schedules fence_bh, which drains it on
-     * the main loop under the BQL. Mirrors virgl's async_fenceq/async_fence_bh.
+     * accel->ctx (main loop or IOThread) under the BQL. Mirrors virgl's
+     * async_fenceq/async_fence_bh.
      */
     QEMUBH *fence_bh;
     QSLIST_HEAD(, accel_context_fence) async_fenceq;
