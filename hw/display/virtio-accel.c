@@ -17,9 +17,9 @@
 #include "hw/virtio/virtio-bus.h"
 #include "hw/virtio/virtio-gpu.h"
 #include "hw/virtio/virtio-gpu-bswap.h"
-#include "hw/qdev-properties.h"
+#include "hw/core/qdev-properties.h"
 #include "system/iothread.h"
-#include "block/aio-wait.h"
+#include "qemu/aio-wait.h"
 
 #include <vaccel.h>
 
